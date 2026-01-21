@@ -1,0 +1,13 @@
+LICENSE
+README.md
+setup.py
+controldiffeq/__init__.py
+controldiffeq/cdeint_module.py
+controldiffeq/interpolate.py
+controldiffeq/misc.py
+controldiffeq.egg-info/PKG-INFO
+controldiffeq.egg-info/SOURCES.txt
+controldiffeq.egg-info/dependency_links.txt
+controldiffeq.egg-info/not-zip-safe
+controldiffeq.egg-info/requires.txt
+controldiffeq.egg-info/top_level.txt

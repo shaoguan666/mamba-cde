@@ -1,0 +1,2 @@
+torch>=1.0.0
+torchdiffeq>=0.0.1
