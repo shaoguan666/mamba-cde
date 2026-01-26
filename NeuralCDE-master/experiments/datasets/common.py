@@ -53,10 +53,12 @@ def normalise_data(X, y):
 
 
 def preprocess_data(times, X, y, final_index, append_times, append_intensity):
+    print("  [1/6] Normalizing data...")
     X = normalise_data(X, y)
 
     # Append extra channels together. Note that the order here: time, intensity, original, is important, and some models
     # depend on that order.
+    print("  [2/6] Augmenting features...")
     augmented_X = []
     if append_times:
         augmented_X.append(times.unsqueeze(0).repeat(X.size(0), 1).unsqueeze(-1))
@@ -70,16 +72,21 @@ def preprocess_data(times, X, y, final_index, append_times, append_intensity):
     else:
         X = torch.cat(augmented_X, dim=2)
 
+    print("  [3/6] Splitting data into train/val/test...")
     train_X, val_X, test_X = split_data(X, y)
     train_y, val_y, test_y = split_data(y, y)
     train_final_index, val_final_index, test_final_index = split_data(final_index, y)
 
+    print("  [4/6] Computing spline coefficients for train set...")
     train_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, train_X)
+    print("  [5/6] Computing spline coefficients for val set...")
     val_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, val_X)
+    print("  [6/6] Computing spline coefficients for test set...")
     test_coeffs = controldiffeq.natural_cubic_spline_coeffs(times, test_X)
 
     in_channels = X.size(-1)
 
+    print("  Preprocessing complete!")
     return (times, train_coeffs, val_coeffs, test_coeffs, train_y, val_y, test_y, train_final_index, val_final_index,
             test_final_index, in_channels)
 
