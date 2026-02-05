@@ -49,7 +49,7 @@ def parse_args():
 # 各模型的推荐超参数
 MODEL_CONFIGS = {
     'ncde': {
-        'hidden_channels': 49,
+        'hidden_channels': 64,
         'hidden_hidden_channels': 49,
         'num_hidden_layers': 4
     },
