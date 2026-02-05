@@ -63,11 +63,7 @@ class ModulatedSingleHiddenLayer(torch.nn.Module):
         h_raw = Linear(z)
         gamma(t), beta(t) = Linear(Phi(t))
         h_mod = (1 + gamma(t)) * h_raw + beta(t)
-        output = Linear(tanh(h_mod))
-
-    IMPORTANT: Uses tanh activation (bounded to [-1, 1]) instead of ReLU.
-    ReLU is unbounded and causes numerical instability when combined with
-    FiLM's multiplicative modulation, leading to gradient explosion in ODE solvers.
+        output = Linear(ReLU(h_mod))
     """
     def __init__(self, input_channels, hidden_channels, time_dim=32):
         """
@@ -93,9 +89,6 @@ class ModulatedSingleHiddenLayer(torch.nn.Module):
         # Main network (same structure as SingleHiddenLayer)
         self.linear1 = torch.nn.Linear(hidden_channels, self.hidden_hidden)
         self.linear2 = torch.nn.Linear(self.hidden_hidden, input_channels * hidden_channels)
-
-        # LayerNorm for stabilizing FiLM modulation output
-        self.layer_norm = torch.nn.LayerNorm(self.hidden_hidden)
 
         # Initialize FiLM generator to identity modulation at start
         # gamma = 0, beta = 0 means h_mod = (1 + 0) * h_raw + 0 = h_raw
@@ -143,17 +136,11 @@ class ModulatedSingleHiddenLayer(torch.nn.Module):
         # Feature extraction
         h_raw = self.linear1(z)  # (..., 128)
 
-        # LayerNorm BEFORE FiLM: normalize features first, then modulate
-        # This preserves the time modulation effect (gamma/beta won't be canceled out)
-        h_norm = self.layer_norm(h_raw)
+        # FiLM modulation: (1 + gamma) * h_raw + beta
+        h_mod = (1 + gamma) * h_raw + beta
 
-        # FiLM modulation: (1 + gamma) * h_norm + beta
-        # Use softsign to softly limit gamma to (-1, 1) with smoother gradients than tanh
-        gamma = gamma / (1 + torch.abs(gamma))
-        h_mod = (1 + gamma) * h_norm + beta
-
-        # Activation: tanh is bounded [-1, 1], critical for ODE/CDE numerical stability
-        h_mod = torch.tanh(h_mod)
+        # Activation and output
+        h_mod = torch.relu(h_mod)
         out = self.linear2(h_mod)
 
         # Reshape to match expected output: (..., hidden_channels, input_channels)

@@ -8,7 +8,6 @@ Neural CDE 项目
     python run_sepsis.py --all        # 运行所有模型
     python run_sepsis.py --cpu        # 使用CPU
     python run_sepsis.py --dry-run    # 测试模式(不保存结果)
-    python run_sepsis.py --modulated  # 启用时间调制机制(仅NCDE有效)
 """
 
 import sys
@@ -44,8 +43,6 @@ def parse_args():
                         help='测试模式,不保存结果')
     parser.add_argument('--repeats', type=int, default=1,
                         help='重复实验次数 (default: 1)')
-    parser.add_argument('--modulated', action='store_true',
-                        help='启用时间调制机制 (仅对 NCDE 模型有效)')
     return parser.parse_args()
 
 
@@ -79,7 +76,7 @@ MODEL_CONFIGS = {
 }
 
 
-def run_single_model(model_name, intensity, device, max_epochs, dry_run, modulated=False):
+def run_single_model(model_name, intensity, device, max_epochs, dry_run):
     """运行单个模型"""
     import sepsis
 
@@ -89,7 +86,6 @@ def run_single_model(model_name, intensity, device, max_epochs, dry_run, modulat
     print(f"模型: {model_name.upper()}")
     print(f"设备: {device}")
     print(f"强度特征: {'Yes' if intensity else 'No'}")
-    print(f"时间调制 (Modulated): {'Yes' if modulated else 'No'}")
     print(f"超参数: {config}")
     print("=" * 60)
 
@@ -99,7 +95,6 @@ def run_single_model(model_name, intensity, device, max_epochs, dry_run, modulat
         model_name=model_name,
         max_epochs=max_epochs,
         dry_run=dry_run,
-        modulated=modulated,
         **config
     )
 
@@ -160,8 +155,7 @@ def main():
                     intensity=args.intensity,
                     device=device,
                     max_epochs=args.epochs,
-                    dry_run=args.dry_run,
-                    modulated=args.modulated
+                    dry_run=args.dry_run
                 )
                 print_results(result, model_name)
 
@@ -190,8 +184,7 @@ def main():
                 intensity=args.intensity,
                 device=device,
                 max_epochs=args.epochs,
-                dry_run=args.dry_run,
-                modulated=args.modulated
+                dry_run=args.dry_run
             )
             print_results(result, args.model)
 

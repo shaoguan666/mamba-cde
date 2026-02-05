@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(powershell -Command \"Get-ChildItem -Recurse ''D:\\\\实验室\\\\mamba-cde\\\\NeuralCDE-master\\\\experiments\\\\results\\\\sepsis_intensity_modulated'' | Select-Object FullName, Length, LastWriteTime\")"
-    ]
-  }
-}

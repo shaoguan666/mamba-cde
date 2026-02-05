@@ -9,7 +9,7 @@ import controldiffeq
 
 
 class NeuralCDE(torch.nn.Module):
-    r"""A Neural CDE model. Provides a wrapper around the lower-level cdeint function, to get a flexible Neural CDE
+    """A Neural CDE model. Provides a wrapper around the lower-level cdeint function, to get a flexible Neural CDE
     model.
 
     Specifically, considering the CDE
@@ -117,17 +117,11 @@ class NeuralCDE(torch.nn.Module):
                 time_diffs = times[1:] - times[:-1]
                 options['step_size'] = time_diffs.min().item()
 
-        # Check if func is time-aware (ModulatedSingleHiddenLayer)
-        # Import inside forward to avoid circular import
-        from .vector_fields import ModulatedSingleHiddenLayer
-        is_modulated = isinstance(self.func, ModulatedSingleHiddenLayer)
-
         # Actually solve the CDE
         z_t = controldiffeq.cdeint(dX_dt=cubic_spline.derivative,
                                    z0=z0,
                                    func=self.func,
                                    t=t,
-                                   time_aware=is_modulated,
                                    **kwargs)
 
         # Organise the output
