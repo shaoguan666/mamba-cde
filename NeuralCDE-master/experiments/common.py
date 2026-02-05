@@ -139,6 +139,8 @@ def _train_loop(train_dataloader, val_dataloader, model, times, optimizer, loss_
                 pred_y = model(times, train_coeffs, lengths, **kwargs)
                 loss = loss_fn(pred_y, train_y)
                 loss.backward()
+                # Gradient clipping to prevent gradient explosion from ODE integration
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 optimizer.zero_grad()
 
