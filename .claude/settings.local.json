@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(python run_uea_benchmark.py:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c:*)",
+      "Bash(conda env list:*)",
+      "Bash(\"d:\\\\实验室\\\\mamba-cde\\\\.conda\\\\python.exe\" -c \"import torch; print\\(''torch OK''\\); from sktime.datasets import load_from_tsfile_to_dataframe; print\\(''sktime OK''\\)\")",
+      "Bash(conda run:*)",
+      "Bash(dir:*)"
     ]
   }
 }

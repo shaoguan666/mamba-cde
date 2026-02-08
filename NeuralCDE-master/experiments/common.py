@@ -7,6 +7,7 @@ import pathlib
 import sklearn.metrics
 import torch
 import tqdm
+import warnings
 
 import models
 
@@ -46,7 +47,8 @@ class _AttrDict(dict):
 
 
 def _evaluate_metrics(dataloader, model, times, loss_fn, num_classes, device, kwargs):
-    with torch.no_grad():
+    with torch.no_grad(), warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*unique classes.*", category=UserWarning)
         total_accuracy = 0
         total_confusion = torch.zeros(num_classes, num_classes).numpy()  # occurs all too often
         total_dataset_size = 0

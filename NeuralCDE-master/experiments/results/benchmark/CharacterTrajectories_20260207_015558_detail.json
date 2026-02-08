@@ -1,0 +1,166 @@
+{
+  "config": {
+    "dataset": "CharacterTrajectories",
+    "missing_rates": [
+      0.3,
+      0.5,
+      0.7
+    ],
+    "models": [
+      "ncde",
+      "odernn"
+    ],
+    "repeats": 1,
+    "max_epochs": 200,
+    "dry_run": false,
+    "timestamp": "20260207_015558"
+  },
+  "runs": [
+    {
+      "model": "ncde",
+      "missing_rate": 0.3,
+      "repeat": 1,
+      "test_accuracy": 0.9903846383094788,
+      "train_accuracy": 0.9979838132858276,
+      "val_accuracy": 0.9855769872665405,
+      "memory_bytes": 19402752,
+      "parameters": 8212,
+      "elapsed_seconds": 13459.5,
+      "config": {
+        "hidden_channels": 32,
+        "hidden_hidden_channels": 32,
+        "num_hidden_layers": 3
+      }
+    },
+    {
+      "model": "ncde",
+      "missing_rate": 0.5,
+      "repeat": 1,
+      "test_accuracy": 0.983173131942749,
+      "train_accuracy": 0.9974797964096069,
+      "val_accuracy": 0.978365421295166,
+      "memory_bytes": 2363392,
+      "parameters": 8212,
+      "elapsed_seconds": 13028.6,
+      "config": {
+        "hidden_channels": 32,
+        "hidden_hidden_channels": 32,
+        "num_hidden_layers": 3
+      }
+    },
+    {
+      "model": "ncde",
+      "missing_rate": 0.7,
+      "repeat": 1,
+      "test_accuracy": 0.9903846383094788,
+      "train_accuracy": 0.9984878897666931,
+      "val_accuracy": 0.9879807829856873,
+      "memory_bytes": 2363392,
+      "parameters": 8212,
+      "elapsed_seconds": 22848.2,
+      "config": {
+        "hidden_channels": 32,
+        "hidden_hidden_channels": 32,
+        "num_hidden_layers": 3
+      }
+    },
+    {
+      "model": "odernn",
+      "missing_rate": 0.3,
+      "repeat": 1,
+      "test_accuracy": 0.9591346383094788,
+      "train_accuracy": 0.9949596524238586,
+      "val_accuracy": 0.9639423489570618,
+      "memory_bytes": 13475840,
+      "parameters": 8436,
+      "elapsed_seconds": 16900.5,
+      "config": {
+        "hidden_channels": 32,
+        "hidden_hidden_channels": 32,
+        "num_hidden_layers": 3
+      }
+    },
+    {
+      "model": "odernn",
+      "missing_rate": 0.5,
+      "repeat": 1,
+      "test_accuracy": 0.942307710647583,
+      "train_accuracy": 0.9793346524238586,
+      "val_accuracy": 0.9375000596046448,
+      "memory_bytes": 13475840,
+      "parameters": 8436,
+      "elapsed_seconds": 14664.2,
+      "config": {
+        "hidden_channels": 32,
+        "hidden_hidden_channels": 32,
+        "num_hidden_layers": 3
+      }
+    },
+    {
+      "model": "odernn",
+      "missing_rate": 0.7,
+      "repeat": 1,
+      "test_accuracy": 0.9543269872665405,
+      "train_accuracy": 0.9853830337524414,
+      "val_accuracy": 0.9591346383094788,
+      "memory_bytes": 13475840,
+      "parameters": 8436,
+      "elapsed_seconds": 15027.4,
+      "config": {
+        "hidden_channels": 32,
+        "hidden_hidden_channels": 32,
+        "num_hidden_layers": 3
+      }
+    }
+  ],
+  "summary": {
+    "ncde_miss30": {
+      "acc_mean": 0.9903846383094788,
+      "acc_std": 0.0,
+      "acc_all": [
+        0.9903846383094788
+      ],
+      "memory_mean_MB": 19.402752
+    },
+    "ncde_miss50": {
+      "acc_mean": 0.983173131942749,
+      "acc_std": 0.0,
+      "acc_all": [
+        0.983173131942749
+      ],
+      "memory_mean_MB": 2.363392
+    },
+    "ncde_miss70": {
+      "acc_mean": 0.9903846383094788,
+      "acc_std": 0.0,
+      "acc_all": [
+        0.9903846383094788
+      ],
+      "memory_mean_MB": 2.363392
+    },
+    "odernn_miss30": {
+      "acc_mean": 0.9591346383094788,
+      "acc_std": 0.0,
+      "acc_all": [
+        0.9591346383094788
+      ],
+      "memory_mean_MB": 13.47584
+    },
+    "odernn_miss50": {
+      "acc_mean": 0.942307710647583,
+      "acc_std": 0.0,
+      "acc_all": [
+        0.942307710647583
+      ],
+      "memory_mean_MB": 13.47584
+    },
+    "odernn_miss70": {
+      "acc_mean": 0.9543269872665405,
+      "acc_std": 0.0,
+      "acc_all": [
+        0.9543269872665405
+      ],
+      "memory_mean_MB": 13.47584
+    }
+  }
+}
