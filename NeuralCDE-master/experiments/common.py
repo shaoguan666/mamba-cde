@@ -141,6 +141,8 @@ def _train_loop(train_dataloader, val_dataloader, model, times, optimizer, loss_
                 pred_y = model(times, train_coeffs, lengths, **kwargs)
                 loss = loss_fn(pred_y, train_y)
                 loss.backward()
+                # Gradient clipping to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 optimizer.zero_grad()
 
@@ -277,6 +279,29 @@ def make_model(name, input_channels, output_channels, hidden_channels, hidden_hi
             model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
                                      output_channels=output_channels, initial=initial)
             return model, vector_field
+    elif name == 'ncde-film':
+        # Time-modulated Neural CDE with FiLM mechanism (requires time_aware=True in kwargs)
+        def make_model():
+            vector_field = models.ModulatedSingleHiddenLayer(input_channels=input_channels,
+                                                             hidden_channels=hidden_channels,
+                                                             time_dim=32,
+                                                             hidden_hidden_channels=hidden_hidden_channels,
+                                                             num_hidden_layers=num_hidden_layers)
+            model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
+                                     output_channels=output_channels, initial=initial)
+            return model, vector_field
+    elif name == 'ncde-spectral':
+        # Spectral-FiLM hybrid Neural CDE with frequency-domain filtering (requires time_aware=True in kwargs)
+        def make_model():
+            vector_field = models.SpectralModulatedVectorField(input_channels=input_channels,
+                                                               hidden_channels=hidden_channels,
+                                                               time_dim=32,
+                                                               spectral_sigma=2.0,
+                                                               hidden_hidden_channels=hidden_hidden_channels,
+                                                               num_hidden_layers=num_hidden_layers)
+            model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
+                                     output_channels=output_channels, initial=initial)
+            return model, vector_field
     elif name == 'gruode':
         def make_model():
             vector_field = models.GRU_ODE(input_channels=input_channels, hidden_channels=hidden_channels)
@@ -300,6 +325,6 @@ def make_model(name, input_channels, output_channels, hidden_channels, hidden_hi
                                   output_channels=output_channels, use_intensity=use_intensity)
             return model, model
     else:
-        raise ValueError("Unrecognised model name {}. Valid names are 'ncde', 'gruode', 'dt', 'decay' and 'odernn'."
+        raise ValueError("Unrecognised model name {}. Valid names are 'ncde', 'ncde-film', 'ncde-spectral', 'gruode', 'dt', 'decay' and 'odernn'."
                          "".format(name))
     return make_model

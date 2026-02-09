@@ -27,7 +27,7 @@ import torch
 def parse_args():
     parser = argparse.ArgumentParser(description='Sepsis预测实验')
     parser.add_argument('--model', type=str, default='ncde',
-                        choices=['ncde', 'odernn', 'gruode', 'dt', 'decay'],
+                        choices=['ncde', 'ncde-film', 'ncde-spectral', 'odernn', 'gruode', 'dt', 'decay'],
                         help='模型类型 (default: ncde)')
     parser.add_argument('--intensity', action='store_true', default=True,
                         help='使用观察强度特征 (default: True)')
@@ -49,6 +49,16 @@ def parse_args():
 # 各模型的推荐超参数
 MODEL_CONFIGS = {
     'ncde': {
+        'hidden_channels': 64,
+        'hidden_hidden_channels': 49,
+        'num_hidden_layers': 4
+    },
+    'ncde-film': {
+        'hidden_channels': 64,
+        'hidden_hidden_channels': 49,
+        'num_hidden_layers': 4
+    },
+    'ncde-spectral': {
         'hidden_channels': 64,
         'hidden_hidden_channels': 49,
         'num_hidden_layers': 4
@@ -142,7 +152,7 @@ def main():
 
     if args.all:
         # 运行所有模型
-        models = ['ncde', 'odernn', 'gruode', 'dt', 'decay']
+        models = ['ncde', 'ncde-film', 'ncde-spectral', 'odernn', 'gruode', 'dt', 'decay']
         all_results = {}
 
         for model_name in models:

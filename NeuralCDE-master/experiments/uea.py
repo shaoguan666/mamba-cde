@@ -28,6 +28,10 @@ def main(dataset_name, missing_rate=0.3,                                        
     make_model = common.make_model(model_name, input_channels, output_channels, hidden_channels, hidden_hidden_channels,
                                    num_hidden_layers, use_intensity=False, initial=True)
 
+    # Set time_aware=True for time-modulated models
+    if model_name in ('ncde-film', 'ncde-spectral'):
+        kwargs['time_aware'] = True
+
     if dry_run:
         name = None
     else:

@@ -37,6 +37,8 @@ import torch
 # Default hyperparameters per model (from uea.run_all)
 MODEL_CONFIGS = {
     'ncde': dict(hidden_channels=32, hidden_hidden_channels=32, num_hidden_layers=3),
+    'ncde-film': dict(hidden_channels=32, hidden_hidden_channels=None, num_hidden_layers=None),
+    'ncde-spectral': dict(hidden_channels=32, hidden_hidden_channels=None, num_hidden_layers=None),
     'odernn': dict(hidden_channels=32, hidden_hidden_channels=32, num_hidden_layers=3),
     'dt': dict(hidden_channels=47, hidden_hidden_channels=None, num_hidden_layers=None),
     'decay': dict(hidden_channels=47, hidden_hidden_channels=None, num_hidden_layers=None),
