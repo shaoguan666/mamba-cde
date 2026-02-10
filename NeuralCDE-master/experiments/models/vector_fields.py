@@ -246,6 +246,10 @@ class SpectralModulatedVectorField(torch.nn.Module):
         torch.nn.init.normal_(self.freq_projection.weight, mean=0.0, std=0.01)
         torch.nn.init.zeros_(self.freq_projection.bias)
 
+        # Logging mode for visualization and analysis
+        self.logging_enabled = False
+        self.logs = []
+
     def _init_lowpass_filter(self, num_freqs, sigma):
         """Initialize spectral magnitudes as a low-pass filter (Gaussian decay in frequency).
 
@@ -271,6 +275,71 @@ class SpectralModulatedVectorField(torch.nn.Module):
             self.input_channels, self.hidden_channels, self.time_dim, self.spectral_sigma,
             self.hidden_hidden_channels, self.num_hidden_layers)
 
+    def set_logging(self, enabled):
+        """Enable or disable logging mode for internal dynamics visualization.
+
+        Arguments:
+            enabled: Boolean to turn logging on/off.
+        """
+        self.logging_enabled = enabled
+        if enabled:
+            self.logs = []  # Clear logs when enabling
+
+    def clear_logs(self):
+        """Clear all stored logs."""
+        self.logs = []
+
+    def extract_logs(self):
+        """Extract logged data as NumPy arrays for analysis.
+
+        Returns:
+            Dictionary containing:
+                - 'time': Array of time points, shape (num_steps,)
+                - 'gamma': Array of FiLM gamma parameters, shape (num_steps, hidden_hidden_channels)
+                - 'beta': Array of FiLM beta parameters, shape (num_steps, hidden_hidden_channels)
+                - 'spectral_weights': Array of frequency weights, shape (num_steps, num_freqs)
+                - 'time_branch_norm': Array of L2 norms for time branch, shape (num_steps,)
+                - 'spectral_branch_norm': Array of L2 norms for spectral branch, shape (num_steps,)
+                - 'contribution_ratio': Array of spectral/time branch ratio, shape (num_steps,)
+        """
+        import numpy as np
+
+        if not self.logs:
+            return {
+                'time': np.array([]),
+                'gamma': np.array([]),
+                'beta': np.array([]),
+                'spectral_weights': np.array([]),
+                'time_branch_norm': np.array([]),
+                'spectral_branch_norm': np.array([]),
+                'contribution_ratio': np.array([])
+            }
+
+        # Extract and stack all logged entries
+        times = np.array([log['time'] for log in self.logs])
+        gammas = np.stack([log['gamma'] for log in self.logs], axis=0)
+        betas = np.stack([log['beta'] for log in self.logs], axis=0)
+        spectral_weights = np.stack([log['spectral_weights'] for log in self.logs], axis=0)
+        time_norms = np.array([log['time_branch_norm'] for log in self.logs])
+        spectral_norms = np.array([log['spectral_branch_norm'] for log in self.logs])
+
+        # Compute contribution ratio (spectral / time), avoiding division by zero
+        contribution_ratio = np.where(
+            time_norms > 1e-8,
+            spectral_norms / time_norms,
+            0.0
+        )
+
+        return {
+            'time': times,
+            'gamma': gammas,
+            'beta': betas,
+            'spectral_weights': spectral_weights,
+            'time_branch_norm': time_norms,
+            'spectral_branch_norm': spectral_norms,
+            'contribution_ratio': contribution_ratio
+        }
+
     def forward(self, t, z):
         """
         Arguments:
@@ -280,17 +349,6 @@ class SpectralModulatedVectorField(torch.nn.Module):
         Returns:
             Vector field of shape (..., hidden_channels, input_channels).
         """
-        # === NaN check on input ===
-        if torch.isnan(z).any():
-            raise ValueError(f"NaN detected in input z at time {t}")
-
-        # Check for inf in input
-        if torch.isinf(z).any():
-            raise ValueError(f"Inf detected in input z at time {t}, z range: [{z.min()}, {z.max()}]")
-
-        # Clamp z to prevent extreme values that could cause NaN when multiplied with weights
-        z_safe = torch.clamp(z, -10.0, 10.0)
-
         # === Time-domain branch (FiLM) ===
         # Get time encoding
         if t.dim() == 0:
@@ -306,10 +364,6 @@ class SpectralModulatedVectorField(torch.nn.Module):
         gamma = film_params[..., :self.hidden_hidden_channels]  # [batch, hidden_hidden_channels]
         beta = film_params[..., self.hidden_hidden_channels:]   # [batch, hidden_hidden_channels]
 
-        # Clamp FiLM parameters to prevent extreme modulation
-        gamma = torch.clamp(gamma, -5.0, 5.0)
-        beta = torch.clamp(beta, -10.0, 10.0)
-
         # Broadcast gamma and beta to match z's batch dimensions
         if z.dim() > 2:
             extra_dims = z.dim() - 2
@@ -318,72 +372,59 @@ class SpectralModulatedVectorField(torch.nn.Module):
                 beta = beta.unsqueeze(1)
 
         # Multi-layer feature extraction + FiLM modulation
-        h_time = self.linear_in(z_safe)  # (..., hidden_hidden_channels)
-        if torch.isnan(h_time).any():
-            # Check if weights have NaN
-            if torch.isnan(self.linear_in.weight).any() or torch.isnan(self.linear_in.bias).any():
-                raise ValueError(f"NaN in linear_in weights/bias at time {t}")
-            raise ValueError(f"NaN in h_time after linear_in at time {t}, z_safe range: [{z_safe.min()}, {z_safe.max()}]")
+        h_time = self.linear_in(z)  # (..., hidden_hidden_channels)
 
         # FiLM modulation: (1 + gamma) * h + beta
         h_time = (1 + gamma) * h_time + beta
-        if torch.isnan(h_time).any():
-            raise ValueError(f"NaN in h_time before ReLU at time {t}")
-
-        h_time = torch.relu(h_time)
-        if torch.isnan(h_time).any():
-            raise ValueError(f"NaN in h_time after ReLU at time {t}")
+        h_time = h_time.relu()
 
         # Additional hidden layers
         for linear in self.linears:
             h_time = linear(h_time)
-            h_time = torch.relu(h_time)
+            h_time = h_time.relu()
 
         # === Frequency-domain branch ===
         # Apply FFT on feature dimension (last dimension of z)
-        # Use z_safe for FFT as well
-        z_freq = torch.fft.rfft(z_safe, dim=-1)  # (..., num_freqs) complex
-        if torch.isnan(z_freq).any():
-            raise ValueError(f"NaN in z_freq at time {t}")
+        z_freq = torch.fft.rfft(z, dim=-1)  # (..., num_freqs) complex
 
         # Apply learnable spectral filter (magnitude-only, phase unchanged)
-        # Clamp spectral magnitudes to prevent extreme filtering
-        spectral_mags_clamped = torch.clamp(self.spectral_magnitudes, 0.0, 10.0)
-        z_freq_filtered = z_freq * spectral_mags_clamped
-        if torch.isnan(z_freq_filtered).any():
-            raise ValueError(f"NaN in z_freq_filtered at time {t}")
-
+        z_freq_filtered = z_freq * self.spectral_magnitudes
         # Inverse FFT back to spatial domain
         h_freq = torch.fft.irfft(z_freq_filtered, n=self.hidden_channels, dim=-1)  # (..., hidden_channels)
-        if torch.isnan(h_freq).any():
-            raise ValueError(f"NaN in h_freq at time {t}")
-
-        # Clamp FFT output to prevent extreme values
-        h_freq = torch.clamp(h_freq, -100.0, 100.0)
 
         # Project frequency features to hidden dimension to match h_time's shape
         h_freq_proj = self.freq_projection(h_freq)  # (..., hidden_hidden_channels)
-        if torch.isnan(h_freq_proj).any():
-            raise ValueError(f"NaN in h_freq_proj at time {t}")
+
+        # === Logging (if enabled) ===
+        if self.logging_enabled:
+            gamma_log = gamma.mean(dim=0).detach().cpu().numpy()
+            beta_log = beta.mean(dim=0).detach().cpu().numpy()
+            spectral_weights_log = self.spectral_magnitudes.detach().cpu().numpy()
+            time_branch_norm = torch.norm(h_time, p=2, dim=-1).mean().item()
+            spectral_branch_norm = torch.norm(h_freq_proj, p=2, dim=-1).mean().item()
+
+            if t.dim() == 0:
+                time_log = t.item()
+            else:
+                time_log = t[0].item()
+
+            self.logs.append({
+                'time': time_log,
+                'gamma': gamma_log,
+                'beta': beta_log,
+                'spectral_weights': spectral_weights_log,
+                'time_branch_norm': time_branch_norm,
+                'spectral_branch_norm': spectral_branch_norm
+            })
 
         # === Fusion ===
-        # Combine time-domain and frequency-domain features
-        # Clamp freq_scale to prevent extreme scaling
-        freq_scale_clamped = torch.clamp(self.freq_scale, 0.0, 1.0)
-        h_fused = h_time + freq_scale_clamped * h_freq_proj
-        if torch.isnan(h_fused).any():
-            raise ValueError(f"NaN in h_fused at time {t}")
+        h_fused = h_time + self.freq_scale * h_freq_proj
 
         # === Output ===
         out = self.linear_out(h_fused)
-        if torch.isnan(out).any():
-            raise ValueError(f"NaN in out before reshape at time {t}")
-
         out = out.view(*z.shape[:-1], self.hidden_channels, self.input_channels)
-
-        # === NaN check on output ===
-        if torch.isnan(out).any():
-            raise ValueError(f"NaN detected in output at time {t}")
+        # tanh bounds output to [-1, 1], critical for ODE integration stability
+        out = out.tanh()
 
         return out
 

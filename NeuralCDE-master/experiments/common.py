@@ -212,6 +212,8 @@ def _save_results(name, result):
     del result_to_save['val_dataloader']
     del result_to_save['test_dataloader']
     result_to_save['model'] = str(result_to_save['model'])
+    if 'vector_field' in result_to_save:
+        result_to_save['vector_field'] = str(result_to_save['vector_field'])
 
     num += 1
     with open(loc / str(num), 'w') as f:
@@ -259,6 +261,7 @@ def main(name, times, train_dataloader, val_dataloader, test_dataloader, device,
                        val_dataloader=val_dataloader,
                        test_dataloader=test_dataloader,
                        model=model.to('cpu'),
+                       vector_field=regularise_parameters,  # Store vector_field reference for logging
                        parameters=_count_parameters(model),
                        history=history,
                        train_metrics=train_metrics,
