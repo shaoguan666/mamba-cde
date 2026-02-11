@@ -129,6 +129,7 @@ def _train_loop(train_dataloader, val_dataloader, model, times, optimizer, loss_
 
     tqdm_range = tqdm.tqdm(range(max_epochs))
     tqdm_range.write('Starting training for model:\n\n' + str(model) + '\n\n')
+    first_batch = True
     for epoch in tqdm_range:
         if breaking:
             break
@@ -137,8 +138,13 @@ def _train_loop(train_dataloader, val_dataloader, model, times, optimizer, loss_
             if breaking:
                 break
             with _SuppressAssertions(tqdm_range):
+                if first_batch:
+                    tqdm_range.write('[INFO] Processing first batch (may take 5-15 minutes for Mamba CUDA kernel compilation)...')
                 *train_coeffs, train_y, lengths = batch
                 pred_y = model(times, train_coeffs, lengths, **kwargs)
+                if first_batch:
+                    tqdm_range.write('[INFO] First forward pass completed! Training will be much faster now.')
+                    first_batch = False
                 loss = loss_fn(pred_y, train_y)
                 loss.backward()
                 # Gradient clipping to prevent exploding gradients
@@ -305,6 +311,34 @@ def make_model(name, input_channels, output_channels, hidden_channels, hidden_hi
             model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
                                      output_channels=output_channels, initial=initial)
             return model, vector_field
+    elif name == 'ncde-spectral-v2':
+        # Enhanced Spectral-FiLM with dynamic fusion and multi-scale frequency features (requires time_aware=True)
+        def make_model():
+            vector_field = models.EnhancedSpectralModulatedVectorField(input_channels=input_channels,
+                                                                       hidden_channels=hidden_channels,
+                                                                       time_dim=32,
+                                                                       spectral_sigma=2.0,
+                                                                       hidden_hidden_channels=hidden_hidden_channels,
+                                                                       num_hidden_layers=num_hidden_layers)
+            model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
+                                     output_channels=output_channels, initial=initial)
+            return model, vector_field
+    elif name == 'ncde-mamba':
+        # Mamba-NCDE: Mamba state space model for global dynamics (requires time_aware=True in kwargs)
+        def make_model():
+            if not models.MAMBA_AVAILABLE:
+                raise ImportError("Mamba-NCDE requires mamba-ssm. Install: pip install mamba-ssm")
+            vector_field = models.MambaModulatedVectorField(input_channels=input_channels,
+                                                            hidden_channels=hidden_channels,
+                                                            time_dim=32,
+                                                            hidden_hidden_channels=hidden_hidden_channels,
+                                                            num_hidden_layers=num_hidden_layers,
+                                                            mamba_d_model=64,
+                                                            mamba_n_layer=2,
+                                                            fusion_mode='learned')
+            model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
+                                     output_channels=output_channels, initial=initial)
+            return model, vector_field
     elif name == 'gruode':
         def make_model():
             vector_field = models.GRU_ODE(input_channels=input_channels, hidden_channels=hidden_channels)
@@ -328,6 +362,6 @@ def make_model(name, input_channels, output_channels, hidden_channels, hidden_hi
                                   output_channels=output_channels, use_intensity=use_intensity)
             return model, model
     else:
-        raise ValueError("Unrecognised model name {}. Valid names are 'ncde', 'ncde-film', 'ncde-spectral', 'gruode', 'dt', 'decay' and 'odernn'."
+        raise ValueError("Unrecognised model name {}. Valid names are 'ncde', 'ncde-film', 'ncde-spectral', 'ncde-mamba', 'gruode', 'dt', 'decay' and 'odernn'."
                          "".format(name))
     return make_model

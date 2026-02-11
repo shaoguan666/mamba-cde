@@ -101,6 +101,75 @@ def plot_mechanism_dynamics(logs, save_dir='./figures'):
     print("=" * 70 + "\n")
 
 
+def plot_mamba_dynamics(logs, save_dir='./figures'):
+    """
+    生成3个论文级别的图表，用于展示MambaModulatedVectorField的内部机制
+
+    参数:
+        logs (dict): 日志数据字典，包含以下键:
+            - 't' 或 'time': 时间步数组
+            - 'gamma': FiLM gamma参数 (shape: [T, D])
+            - 'beta': FiLM beta参数 (shape: [T, D])
+            - 'time_branch_norm': 时间分支的L2范数 (shape: [T])
+            - 'mamba_branch_norm': Mamba分支的L2范数 (shape: [T])
+            - 'fusion_alpha': 融合权重 (shape: [T]) 或 None
+            - 'contribution_ratio': 贡献率比值 (shape: [T])
+
+    save_dir (str): 图表保存目录
+    """
+
+    # 创建保存目录
+    os.makedirs(save_dir, exist_ok=True)
+
+    # 兼容两种时间键名
+    time = logs.get('t', logs.get('time', None))
+    if time is None:
+        raise ValueError("日志中必须包含 't' 或 'time' 键")
+
+    # 如果是torch.Tensor，转换为numpy
+    time = _to_numpy(time)
+    gamma = _to_numpy(logs['gamma'])
+    beta = _to_numpy(logs['beta'])
+    time_branch_norm = _to_numpy(logs['time_branch_norm'])
+    mamba_branch_norm = _to_numpy(logs['mamba_branch_norm'])
+    contribution_ratio = _to_numpy(logs['contribution_ratio'])
+
+    # 融合权重（可能为None）
+    fusion_alpha = logs.get('fusion_alpha', None)
+    if fusion_alpha is not None:
+        fusion_alpha = _to_numpy(fusion_alpha)
+
+    print("\n" + "=" * 70)
+    print("生成Mamba-NCDE论文图表")
+    print("=" * 70)
+
+    # Fig 1: Fusion Gate Dynamics (如果有learned fusion)
+    if fusion_alpha is not None:
+        print("\n[1/3] 生成 Fig 1: Fusion Gate Dynamics...")
+        fig1_path = os.path.join(save_dir, 'fig1_mamba_fusion_gate.pdf')
+        _plot_mamba_fusion_gate(time, fusion_alpha, fig1_path)
+        print(f"      已保存: {fig1_path}")
+    else:
+        print("\n[1/3] 跳过 Fig 1: Fusion Gate (固定权重或相加模式)")
+
+    # Fig 2: FiLM Temporal Adaptation (双轴)
+    print("[2/3] 生成 Fig 2: FiLM Temporal Adaptation...")
+    fig2_path = os.path.join(save_dir, 'fig2_mamba_film_adaptation.pdf')
+    _plot_film_adaptation(time, gamma, beta, contribution_ratio, fig2_path)
+    print(f"      已保存: {fig2_path}")
+
+    # Fig 3: Branch Contribution Analysis (Time vs Mamba)
+    print("[3/3] 生成 Fig 3: Branch Contribution Analysis...")
+    fig3_path = os.path.join(save_dir, 'fig3_mamba_branch_contribution.pdf')
+    _plot_mamba_branch_contribution(time, time_branch_norm, mamba_branch_norm, fig3_path)
+    print(f"      已保存: {fig3_path}")
+
+    print("\n" + "=" * 70)
+    print("所有图表生成完成！")
+    print(f"保存位置: {os.path.abspath(save_dir)}")
+    print("=" * 70 + "\n")
+
+
 def _to_numpy(tensor):
     """将torch.Tensor转换为numpy数组"""
     if isinstance(tensor, torch.Tensor):
@@ -265,6 +334,92 @@ def _plot_branch_contribution(time, time_branch_norm, spectral_branch_norm, save
     ax.set_xlabel('Time', fontsize=12, fontweight='bold')
     ax.set_ylabel('L2 Norm of Features', fontsize=12, fontweight='bold')
     ax.set_title('Branch Contribution Analysis', fontsize=13, fontweight='bold', pad=15)
+
+    # 移除网格线
+    ax.grid(False)
+
+    # 图例
+    ax.legend(loc='upper left', fontsize=10, framealpha=0.9)
+
+    # 设置刻度
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_mamba_fusion_gate(time, fusion_alpha, save_path):
+    """
+    Fig 1: Mamba融合门控机制
+    展示learned fusion gate (alpha)随时间的动态变化
+    alpha接近1表示更依赖Time Branch，接近0表示更依赖Mamba Branch
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    # 绘制融合权重曲线
+    ax.plot(time, fusion_alpha, linewidth=2.5, color='#7B68EE',
+            marker='o', markersize=5, markevery=max(1, len(time)//15),
+            label=r'$\alpha$ (Fusion Weight)')
+
+    # 添加参考线
+    ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.5,
+               label='Balanced (0.5)')
+    ax.axhline(y=1.0, color='#4A90E2', linestyle=':', linewidth=1.2, alpha=0.4)
+    ax.axhline(y=0.0, color='#E94B3C', linestyle=':', linewidth=1.2, alpha=0.4)
+
+    # 添加区域标注
+    ax.fill_between(time, 0.5, 1.0, alpha=0.1, color='#4A90E2',
+                    label='Time-dominant')
+    ax.fill_between(time, 0.0, 0.5, alpha=0.1, color='#E94B3C',
+                    label='Mamba-dominant')
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel(r'Fusion Weight $\alpha$', fontsize=12, fontweight='bold')
+    ax.set_title('Learned Fusion Gate Dynamics', fontsize=13, fontweight='bold', pad=15)
+    ax.set_ylim(-0.05, 1.05)
+
+    # 移除网格线
+    ax.grid(False)
+
+    # 图例
+    ax.legend(loc='best', fontsize=9, framealpha=0.9)
+
+    # 设置刻度
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_mamba_branch_contribution(time, time_branch_norm, mamba_branch_norm, save_path):
+    """
+    Fig 3: Mamba分支贡献分析 (堆叠面积图)
+    对比Time Branch（局部）和Mamba Branch（全局）的贡献
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    # 颜色方案
+    color_time = '#4A90E2'      # 蓝色 - 时间分支(局部，FiLM-MLP)
+    color_mamba = '#9B59B6'     # 紫色 - Mamba分支(全局，状态空间)
+
+    # 绘制堆叠面积图
+    ax.fill_between(time, 0, time_branch_norm,
+                    color=color_time, alpha=0.7, label='Time Branch (Local FiLM-MLP)')
+
+    ax.fill_between(time, time_branch_norm,
+                    time_branch_norm + mamba_branch_norm,
+                    color=color_mamba, alpha=0.7, label='Mamba Branch (Global SSM)')
+
+    # 添加边界线使图形更清晰
+    ax.plot(time, time_branch_norm, color=color_time, linewidth=1.5, alpha=0.8)
+    ax.plot(time, time_branch_norm + mamba_branch_norm,
+           color=color_mamba, linewidth=1.5, alpha=0.8)
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel('L2 Norm of Features', fontsize=12, fontweight='bold')
+    ax.set_title('Branch Contribution Analysis (Time vs Mamba)', fontsize=13, fontweight='bold', pad=15)
 
     # 移除网格线
     ax.grid(False)

@@ -39,6 +39,8 @@ MODEL_CONFIGS = {
         'ncde': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
         'ncde-film': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
         'ncde-spectral': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
+        'ncde-spectral-v2': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
+        'ncde-mamba': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
         'odernn': {'hidden_channels': 128, 'hidden_hidden_channels': 128, 'num_hidden_layers': 4},
         'gruode': {'hidden_channels': 187, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
         'dt': {'hidden_channels': 187, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
@@ -48,6 +50,8 @@ MODEL_CONFIGS = {
         'ncde': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'ncde-film': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'ncde-spectral': {'hidden_channels': 32, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
+        'ncde-spectral-v2': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
+        'ncde-mamba': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'odernn': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'gruode': {'hidden_channels': 47, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
         'dt': {'hidden_channels': 47, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
@@ -57,6 +61,8 @@ MODEL_CONFIGS = {
         'ncde': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
         'ncde-film': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
         'ncde-spectral': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
+        'ncde-spectral-v2': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
+        'ncde-mamba': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
         'odernn': {'hidden_channels': 128, 'hidden_hidden_channels': 64, 'num_hidden_layers': 4},
         'gruode': {'hidden_channels': 160, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
         'dt': {'hidden_channels': 160, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
@@ -75,7 +81,7 @@ def parse_args():
 
     # 模型选择
     parser.add_argument('--model', type=str, default='ncde',
-                        choices=['ncde', 'ncde-film', 'ncde-spectral', 'odernn', 'gruode', 'dt', 'decay'],
+                        choices=['ncde', 'ncde-film', 'ncde-spectral', 'ncde-spectral-v2', 'ncde-mamba', 'odernn', 'gruode', 'dt', 'decay'],
                         help='模型类型 (default: ncde)')
     parser.add_argument('--all-models', action='store_true',
                         help='运行所有模型')
@@ -105,7 +111,7 @@ def parse_args():
 
     # 可视化选项
     parser.add_argument('--visualize', action='store_true',
-                        help='训练后进行可视化分析 (仅支持 ncde-spectral)')
+                        help='训练后进行可视化分析 (支持 ncde-spectral 和 ncde-mamba)')
     parser.add_argument('--output', type=str, default=None,
                         help='可视化输出路径 (default: auto)')
 
@@ -217,13 +223,13 @@ def print_results(result, model_name, dataset):
     print("=" * 70)
 
 
-def visualize_results(result, dataset_name, output_path, device):
+def visualize_results(result, dataset_name, output_path, device, model_name):
     """可视化实验结果"""
     sys.path.insert(0, os.path.join(script_dir, 'analysis'))
     import paper_plots
 
     print("\n" + "=" * 70)
-    print("开始分析内部动态...")
+    print(f"开始分析 {model_name.upper()} 内部动态...")
     print("=" * 70 + "\n")
 
     # Extract vector field and run inference with logging
@@ -234,7 +240,7 @@ def visualize_results(result, dataset_name, output_path, device):
     test_dataloader = result.test_dataloader
     kwargs = {'time_aware': True}
 
-    # Enable logging on the spectral vector field
+    # Enable logging on the vector field
     vector_field.set_logging(True)
 
     with torch.no_grad():
@@ -250,7 +256,15 @@ def visualize_results(result, dataset_name, output_path, device):
     model.to('cpu')
 
     output_dir = os.path.dirname(output_path) or '.'
-    paper_plots.plot_mechanism_dynamics(logs, save_dir=output_dir)
+
+    # 根据模型类型选择可视化函数
+    if model_name == 'ncde-spectral':
+        paper_plots.plot_mechanism_dynamics(logs, save_dir=output_dir)
+    elif model_name == 'ncde-mamba':
+        paper_plots.plot_mamba_dynamics(logs, save_dir=output_dir)
+    else:
+        print(f"[WARNING] 未知的模型类型: {model_name}")
+        return
 
     # Save logs as npz
     npz_path = output_path.replace('.png', '_logs.npz')
@@ -282,7 +296,7 @@ def main():
 
     # 确定要运行的模型
     if args.all_models:
-        models = ['ncde', 'ncde-film', 'ncde-spectral', 'odernn', 'gruode', 'dt', 'decay']
+        models = ['ncde', 'ncde-film', 'ncde-spectral', 'ncde-mamba', 'odernn', 'gruode', 'dt', 'decay']
     else:
         models = [args.model]
 
@@ -342,15 +356,15 @@ def main():
 
             # 可视化 (仅第一次运行且用户请求)
             if i == 0 and args.visualize:
-                if model_name == 'ncde-spectral':
+                if model_name in ('ncde-spectral', 'ncde-mamba'):
                     if args.output:
                         output_path = args.output
                     else:
                         output_path = f'{args.dataset}_{model_name}_dynamics.png'
 
-                    visualize_results(result, dataset_display, output_path, device)
+                    visualize_results(result, dataset_display, output_path, device, model_name)
                 else:
-                    print(f"\n[WARNING] 可视化仅支持 ncde-spectral 模型，跳过 {model_name}")
+                    print(f"\n[WARNING] 可视化仅支持 ncde-spectral 和 ncde-mamba 模型，跳过 {model_name}")
 
         all_results[model_name] = model_results
 

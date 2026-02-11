@@ -49,7 +49,7 @@ def main(intensity,                                                             
         return InitialValueNetwork(intensity, hidden_channels, model), regularise
 
     # Set time_aware=True for time-modulated models
-    if model_name in ('ncde-film', 'ncde-spectral'):
+    if model_name in ('ncde-film', 'ncde-spectral', 'ncde-spectral-v2', 'ncde-mamba'):
         kwargs['time_aware'] = True
 
     if dry_run:
@@ -63,10 +63,11 @@ def main(intensity,                                                             
                        step_mode=True)
 
 
-def run_all(intensity, device, model_names=('ncde', 'ncde-film', 'ncde-spectral', 'odernn', 'dt', 'decay', 'gruode')):
+def run_all(intensity, device, model_names=('ncde', 'ncde-film', 'ncde-spectral', 'ncde-mamba', 'odernn', 'dt', 'decay', 'gruode')):
     model_kwargs = dict(ncde=dict(hidden_channels=64, hidden_hidden_channels=49, num_hidden_layers=4),
                         **{'ncde-film': dict(hidden_channels=64, hidden_hidden_channels=49, num_hidden_layers=4)},
                         **{'ncde-spectral': dict(hidden_channels=64, hidden_hidden_channels=49, num_hidden_layers=4)},
+                        **{'ncde-mamba': dict(hidden_channels=64, hidden_hidden_channels=49, num_hidden_layers=4)},
                         odernn=dict(hidden_channels=128, hidden_hidden_channels=128, num_hidden_layers=4),
                         dt=dict(hidden_channels=187, hidden_hidden_channels=None, num_hidden_layers=None),
                         decay=dict(hidden_channels=187, hidden_hidden_channels=None, num_hidden_layers=None),

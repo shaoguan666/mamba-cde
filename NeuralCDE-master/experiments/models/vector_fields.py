@@ -509,3 +509,12 @@ def GRU_ODE(input_channels, hidden_channels):
     return metamodel.ContinuousRNNConverter(input_channels=input_channels,
                                             hidden_channels=hidden_channels,
                                             model=func)
+
+
+# === Mamba-NCDE Integration ===
+try:
+    from .mamba_vector_field import MambaModulatedVectorField
+    MAMBA_AVAILABLE = True
+except ImportError:
+    MambaModulatedVectorField = None
+    MAMBA_AVAILABLE = False
