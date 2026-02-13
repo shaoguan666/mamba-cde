@@ -518,3 +518,222 @@ try:
 except ImportError:
     MambaModulatedVectorField = None
     MAMBA_AVAILABLE = False
+
+
+class DeepFiLMVectorField(torch.nn.Module):
+    """Deep FiLM-modulated vector field with strong regularization.
+
+    Pure time-branch architecture that removes ineffective global branches (Spectral/Mamba).
+    Focus on doing local temporal dynamics extremely well with:
+    - Multi-layer FiLM modulation on EVERY layer
+    - Per-layer dropout for strong regularization
+    - Learnable time encoder
+    - Tanh-bounded output for ODE stability
+
+    Design Philosophy:
+        "Simple is better than complex. Do one thing well."
+        - Sepsis prediction is about local event detection, not global patterns
+        - Remove complexity, reduce overfitting, improve generalization
+
+    Key Improvements over Spectral/Mamba:
+        1. Fewer parameters (~240K vs 280K/616K) -> less overfitting
+        2. Strong regularization (per-layer dropout) -> better generalization
+        3. Deeper FiLM (4 layers with modulation on each) -> more expressive
+        4. No wasted computation on ineffective branches
+
+    Expected Performance:
+        - AUROC: 0.90-0.91 (target: beat baseline 0.8986)
+        - Training: More stable, faster convergence
+        - Overfitting: Significantly reduced
+    """
+
+    def __init__(self, input_channels, hidden_channels, time_dim=32,
+                 hidden_hidden_channels=64, num_hidden_layers=4, dropout=0.2):
+        """
+        Arguments:
+            input_channels: Number of input channels (from control signal X).
+            hidden_channels: Number of hidden channels (state z dimension).
+            time_dim: Dimension of time encoding (default 32).
+            hidden_hidden_channels: Hidden layer dimension (default 64).
+            num_hidden_layers: Number of hidden layers (default 4).
+            dropout: Dropout probability for regularization (default 0.2).
+        """
+        super(DeepFiLMVectorField, self).__init__()
+
+        self.input_channels = input_channels
+        self.hidden_channels = hidden_channels
+        self.time_dim = time_dim
+        self.hidden_hidden_channels = hidden_hidden_channels
+        self.num_hidden_layers = num_hidden_layers
+        self.dropout_p = dropout
+
+        # Learnable time encoder
+        self.time_encoder = TimeEncoder(time_dim)
+
+        # Multi-layer MLP
+        self.linear_in = torch.nn.Linear(hidden_channels, hidden_hidden_channels)
+        self.linears = torch.nn.ModuleList([
+            torch.nn.Linear(hidden_hidden_channels, hidden_hidden_channels)
+            for _ in range(num_hidden_layers - 1)
+        ])
+
+        # Per-layer FiLM generators (one for each layer including input)
+        self.film_generators = torch.nn.ModuleList([
+            torch.nn.Linear(time_dim, 2 * hidden_hidden_channels)
+            for _ in range(num_hidden_layers)
+        ])
+
+        # Per-layer dropout for regularization
+        self.dropout = torch.nn.Dropout(dropout)
+
+        # Output projection
+        self.linear_out = torch.nn.Linear(hidden_hidden_channels,
+                                         input_channels * hidden_channels)
+
+        # Initialize weights
+        self._init_weights()
+
+        # Logging system for analysis
+        self.logging_enabled = False
+        self.logs = []
+
+    def _init_weights(self):
+        """Initialize weights for stable training start.
+
+        Strategy:
+            - FiLM: identity transform (gamma=0, beta=0)
+            - Output: small initialization (gain=0.1)
+            - This ensures the model starts close to a simple MLP
+        """
+        # FiLM generators: initialize to identity (no modulation at start)
+        for film_gen in self.film_generators:
+            torch.nn.init.zeros_(film_gen.weight)
+            torch.nn.init.zeros_(film_gen.bias)
+
+        # Output layer: small initialization for stability
+        torch.nn.init.xavier_uniform_(self.linear_out.weight, gain=0.1)
+        torch.nn.init.zeros_(self.linear_out.bias)
+
+    def extra_repr(self):
+        return ("input_channels: {}, hidden_channels: {}, time_dim: {}, "
+                "hidden_hidden_channels: {}, num_hidden_layers: {}, dropout: {:.2f}").format(
+                    self.input_channels, self.hidden_channels, self.time_dim,
+                    self.hidden_hidden_channels, self.num_hidden_layers, self.dropout_p)
+
+    def set_logging(self, enabled):
+        """Enable/disable logging for visualization."""
+        self.logging_enabled = enabled
+        if enabled:
+            self.logs = []
+
+    def clear_logs(self):
+        """Clear all stored logs."""
+        self.logs = []
+
+    def extract_logs(self):
+        """Extract logged data as NumPy arrays for analysis.
+
+        Returns:
+            Dictionary containing:
+                - 'time': time points
+                - 'gamma': FiLM gamma parameters (first layer)
+                - 'beta': FiLM beta parameters (first layer)
+                - 'layer_norms': L2 norms at each layer
+        """
+        import numpy as np
+
+        if not self.logs:
+            return {
+                'time': np.array([]),
+                'gamma': np.array([]),
+                'beta': np.array([]),
+                'layer_norms': np.array([])
+            }
+
+        return {
+            'time': np.array([log['time'] for log in self.logs]),
+            'gamma': np.stack([log['gamma'] for log in self.logs], axis=0),
+            'beta': np.stack([log['beta'] for log in self.logs], axis=0),
+            'layer_norms': np.stack([log['layer_norms'] for log in self.logs], axis=0)
+        }
+
+    def forward(self, t, z):
+        """
+        Arguments:
+            t: Current time (scalar or [batch]).
+            z: Hidden state of shape (..., hidden_channels).
+
+        Returns:
+            Vector field of shape (..., hidden_channels, input_channels).
+        """
+        # === Time encoding ===
+        if t.dim() == 0:
+            batch_size = z.shape[0] if z.dim() > 1 else 1
+            t_expanded = t.expand(batch_size)
+        else:
+            t_expanded = t
+
+        time_enc = self.time_encoder(t_expanded)  # [batch, time_dim]
+
+        # === Generate all FiLM parameters ===
+        film_params_all = [fg(time_enc) for fg in self.film_generators]
+        # Each: [batch, 2 * hidden_hidden_channels]
+
+        # Store first layer params for logging
+        gamma_0 = film_params_all[0][..., :self.hidden_hidden_channels]
+        beta_0 = film_params_all[0][..., self.hidden_hidden_channels:]
+
+        # Broadcast FiLM params for multi-dim z
+        if z.dim() > 2:
+            extra_dims = z.dim() - 2
+            film_params_broadcast = []
+            for fp in film_params_all:
+                for _ in range(extra_dims):
+                    fp = fp.unsqueeze(1)
+                film_params_broadcast.append(fp)
+            film_params_all = film_params_broadcast
+
+        # === Layer 0: linear_in + FiLM + ReLU + Dropout ===
+        gamma = film_params_all[0][..., :self.hidden_hidden_channels]
+        beta = film_params_all[0][..., self.hidden_hidden_channels:]
+
+        h = self.linear_in(z)
+        h = (1 + gamma) * h + beta
+        h = torch.relu(h)
+        h = self.dropout(h)
+
+        # Track layer norms for logging
+        layer_norms = [torch.norm(h, p=2, dim=-1).mean().item()] if self.logging_enabled else []
+
+        # === Layers 1..N-1: linears[i] + FiLM + ReLU + Dropout ===
+        for i, linear in enumerate(self.linears):
+            gamma_i = film_params_all[i + 1][..., :self.hidden_hidden_channels]
+            beta_i = film_params_all[i + 1][..., self.hidden_hidden_channels:]
+
+            h = linear(h)
+            h = (1 + gamma_i) * h + beta_i
+            h = torch.relu(h)
+            h = self.dropout(h)
+
+            if self.logging_enabled:
+                layer_norms.append(torch.norm(h, p=2, dim=-1).mean().item())
+
+        # === Output ===
+        out = self.linear_out(h)
+        out = out.view(*z.shape[:-1], self.hidden_channels, self.input_channels)
+        out = torch.tanh(out)  # CRITICAL: bounded for ODE stability
+
+        # === Logging ===
+        if self.logging_enabled:
+            gamma_log = gamma_0.mean(dim=0).detach().cpu().numpy()
+            beta_log = beta_0.mean(dim=0).detach().cpu().numpy()
+            time_log = t.item() if t.dim() == 0 else t[0].item()
+
+            self.logs.append({
+                'time': time_log,
+                'gamma': gamma_log,
+                'beta': beta_log,
+                'layer_norms': layer_norms
+            })
+
+        return out

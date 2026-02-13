@@ -40,6 +40,7 @@ MODEL_CONFIGS = {
         'ncde-film': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
         'ncde-spectral': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
         'ncde-spectral-v2': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
+        'ncde-deepfilm': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
         'ncde-mamba': {'hidden_channels': 64, 'hidden_hidden_channels': 49, 'num_hidden_layers': 4},
         'odernn': {'hidden_channels': 128, 'hidden_hidden_channels': 128, 'num_hidden_layers': 4},
         'gruode': {'hidden_channels': 187, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
@@ -51,6 +52,7 @@ MODEL_CONFIGS = {
         'ncde-film': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'ncde-spectral': {'hidden_channels': 32, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
         'ncde-spectral-v2': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
+        'ncde-deepfilm': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'ncde-mamba': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'odernn': {'hidden_channels': 32, 'hidden_hidden_channels': 32, 'num_hidden_layers': 3},
         'gruode': {'hidden_channels': 47, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
@@ -62,6 +64,7 @@ MODEL_CONFIGS = {
         'ncde-film': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
         'ncde-spectral': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
         'ncde-spectral-v2': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
+        'ncde-deepfilm': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
         'ncde-mamba': {'hidden_channels': 90, 'hidden_hidden_channels': 40, 'num_hidden_layers': 4},
         'odernn': {'hidden_channels': 128, 'hidden_hidden_channels': 64, 'num_hidden_layers': 4},
         'gruode': {'hidden_channels': 160, 'hidden_hidden_channels': None, 'num_hidden_layers': None},
@@ -81,7 +84,7 @@ def parse_args():
 
     # 模型选择
     parser.add_argument('--model', type=str, default='ncde',
-                        choices=['ncde', 'ncde-film', 'ncde-spectral', 'ncde-spectral-v2', 'ncde-mamba', 'odernn', 'gruode', 'dt', 'decay'],
+                        choices=['ncde', 'ncde-film', 'ncde-spectral', 'ncde-spectral-v2', 'ncde-deepfilm', 'ncde-mamba', 'odernn', 'gruode', 'dt', 'decay'],
                         help='模型类型 (default: ncde)')
     parser.add_argument('--all-models', action='store_true',
                         help='运行所有模型')
@@ -296,7 +299,7 @@ def main():
 
     # 确定要运行的模型
     if args.all_models:
-        models = ['ncde', 'ncde-film', 'ncde-spectral', 'ncde-mamba', 'odernn', 'gruode', 'dt', 'decay']
+        models = ['ncde', 'ncde-film', 'ncde-spectral', 'ncde-deepfilm', 'ncde-mamba', 'odernn', 'gruode', 'dt', 'decay']
     else:
         models = [args.model]
 

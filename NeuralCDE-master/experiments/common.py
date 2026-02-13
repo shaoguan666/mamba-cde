@@ -339,6 +339,19 @@ def make_model(name, input_channels, output_channels, hidden_channels, hidden_hi
             model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
                                      output_channels=output_channels, initial=initial)
             return model, vector_field
+    elif name == 'ncde-deepfilm':
+        # DeepFiLM: Pure time-branch with deep FiLM modulation and strong regularization
+        # Removes ineffective global branches (Spectral/Mamba) for better generalization
+        def make_model():
+            vector_field = models.DeepFiLMVectorField(input_channels=input_channels,
+                                                     hidden_channels=hidden_channels,
+                                                     time_dim=32,
+                                                     hidden_hidden_channels=hidden_hidden_channels,
+                                                     num_hidden_layers=num_hidden_layers,
+                                                     dropout=0.2)
+            model = models.NeuralCDE(func=vector_field, input_channels=input_channels, hidden_channels=hidden_channels,
+                                     output_channels=output_channels, initial=initial)
+            return model, vector_field
     elif name == 'gruode':
         def make_model():
             vector_field = models.GRU_ODE(input_channels=input_channels, hidden_channels=hidden_channels)
@@ -362,6 +375,6 @@ def make_model(name, input_channels, output_channels, hidden_channels, hidden_hi
                                   output_channels=output_channels, use_intensity=use_intensity)
             return model, model
     else:
-        raise ValueError("Unrecognised model name {}. Valid names are 'ncde', 'ncde-film', 'ncde-spectral', 'ncde-mamba', 'gruode', 'dt', 'decay' and 'odernn'."
+        raise ValueError("Unrecognised model name {}. Valid names are 'ncde', 'ncde-film', 'ncde-spectral', 'ncde-mamba', 'ncde-deepfilm', 'gruode', 'dt', 'decay' and 'odernn'."
                          "".format(name))
     return make_model

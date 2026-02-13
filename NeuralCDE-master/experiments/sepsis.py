@@ -49,7 +49,7 @@ def main(intensity,                                                             
         return InitialValueNetwork(intensity, hidden_channels, model), regularise
 
     # Set time_aware=True for time-modulated models
-    if model_name in ('ncde-film', 'ncde-spectral', 'ncde-spectral-v2', 'ncde-mamba'):
+    if model_name in ('ncde-film', 'ncde-spectral', 'ncde-spectral-v2', 'ncde-mamba', 'ncde-deepfilm'):
         kwargs['time_aware'] = True
 
     if dry_run:
