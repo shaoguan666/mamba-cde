@@ -435,6 +435,187 @@ def _plot_mamba_branch_contribution(time, time_branch_norm, mamba_branch_norm, s
     plt.close()
 
 
+def plot_deepfilm_dynamics(logs, save_dir='./figures'):
+    """
+    Generate 3 paper-quality figures for DeepFiLMVectorField internal dynamics.
+
+    Arguments:
+        logs (dict): Log data dict from DeepFiLMVectorField.extract_logs(), containing:
+            - 't' or 'time': time point array [T]
+            - 'gamma': FiLM gamma at layer 0 [T, D]
+            - 'beta': FiLM beta at layer 0 [T, D]
+            - 'layer_norms': L2 norms at each layer [T, num_layers]
+        save_dir (str): Directory to save figures.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    time = logs.get('t', logs.get('time', None))
+    if time is None:
+        raise ValueError("Logs must contain 't' or 'time' key")
+
+    time = _to_numpy(time)
+    gamma = _to_numpy(logs['gamma'])
+    beta = _to_numpy(logs['beta'])
+    layer_norms = _to_numpy(logs['layer_norms'])
+
+    print("\n" + "=" * 70)
+    print("Generating DeepFiLM paper figures")
+    print("=" * 70)
+
+    # Fig 1: FiLM Temporal Adaptation (gamma/beta over time)
+    print("\n[1/3] Fig 1: FiLM Temporal Adaptation...")
+    fig1_path = os.path.join(save_dir, 'fig1_deepfilm_film_adaptation.pdf')
+    _plot_deepfilm_film_adaptation(time, gamma, beta, fig1_path)
+    print("      Saved: {}".format(fig1_path))
+
+    # Fig 2: Layer-wise Activation Norms over time
+    print("[2/3] Fig 2: Layer-wise Activation Dynamics...")
+    fig2_path = os.path.join(save_dir, 'fig2_deepfilm_layer_norms.pdf')
+    _plot_deepfilm_layer_norms(time, layer_norms, fig2_path)
+    print("      Saved: {}".format(fig2_path))
+
+    # Fig 3: FiLM Modulation Intensity (|gamma|, |beta| over time)
+    print("[3/3] Fig 3: FiLM Modulation Intensity...")
+    fig3_path = os.path.join(save_dir, 'fig3_deepfilm_modulation_intensity.pdf')
+    _plot_deepfilm_modulation_intensity(time, gamma, beta, fig3_path)
+    print("      Saved: {}".format(fig3_path))
+
+    print("\n" + "=" * 70)
+    print("All DeepFiLM figures generated!")
+    print("Location: {}".format(os.path.abspath(save_dir)))
+    print("=" * 70 + "\n")
+
+
+def _plot_deepfilm_film_adaptation(time, gamma, beta, save_path):
+    """
+    Fig 1: FiLM temporal adaptation for DeepFiLM.
+    Shows mean gamma and beta over time with std shading.
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    if len(gamma.shape) > 1:
+        gamma_mean = gamma.mean(axis=1)
+        gamma_std = gamma.std(axis=1)
+    else:
+        gamma_mean = gamma
+        gamma_std = None
+
+    if len(beta.shape) > 1:
+        beta_mean = beta.mean(axis=1)
+        beta_std = beta.std(axis=1)
+    else:
+        beta_mean = beta
+        beta_std = None
+
+    color_gamma = '#1E88E5'
+    color_beta = '#FFC107'
+
+    markevery = max(1, len(time) // 10)
+
+    ax.plot(time, gamma_mean, color=color_gamma, linewidth=2.5,
+            label=r'$\bar{\gamma}$ (scale)', marker='s', markersize=4,
+            markevery=markevery)
+    if gamma_std is not None:
+        ax.fill_between(time, gamma_mean - gamma_std, gamma_mean + gamma_std,
+                        color=color_gamma, alpha=0.15)
+
+    ax.plot(time, beta_mean, color=color_beta, linewidth=2.5,
+            label=r'$\bar{\beta}$ (shift)', marker='^', markersize=4,
+            markevery=markevery)
+    if beta_std is not None:
+        ax.fill_between(time, beta_mean - beta_std, beta_mean + beta_std,
+                        color=color_beta, alpha=0.15)
+
+    ax.axhline(y=0.0, color='gray', linestyle=':', linewidth=1.2, alpha=0.5)
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel('FiLM Parameters (Layer 0)', fontsize=12, fontweight='bold')
+    ax.set_title('FiLM Temporal Adaptation (DeepFiLM)', fontsize=13, fontweight='bold', pad=15)
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax.grid(False)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_deepfilm_layer_norms(time, layer_norms, save_path):
+    """
+    Fig 2: Layer-wise activation L2 norms over time.
+    Each line is one hidden layer, showing how representations evolve at different depths.
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    colors = ['#1E88E5', '#43A047', '#FFC107', '#E53935']
+    num_layers = layer_norms.shape[1] if layer_norms.ndim == 2 else 1
+    markevery = max(1, len(time) // 10)
+
+    if layer_norms.ndim == 1:
+        ax.plot(time, layer_norms, color=colors[0], linewidth=2.5,
+                label='Layer 1', marker='o', markersize=4, markevery=markevery)
+    else:
+        for i in range(num_layers):
+            ax.plot(time, layer_norms[:, i], color=colors[i % len(colors)],
+                    linewidth=2.5, label='Layer {}'.format(i + 1),
+                    marker=['o', 's', '^', 'D'][i % 4], markersize=4,
+                    markevery=markevery)
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel('L2 Norm of Hidden Features', fontsize=12, fontweight='bold')
+    ax.set_title('Layer-wise Activation Dynamics (DeepFiLM)', fontsize=13, fontweight='bold', pad=15)
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax.grid(False)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_deepfilm_modulation_intensity(time, gamma, beta, save_path):
+    """
+    Fig 3: FiLM modulation intensity over time.
+    Shows |gamma|_mean and |beta|_mean to quantify how strongly time modulates features.
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    if len(gamma.shape) > 1:
+        gamma_intensity = np.abs(gamma).mean(axis=1)
+    else:
+        gamma_intensity = np.abs(gamma)
+
+    if len(beta.shape) > 1:
+        beta_intensity = np.abs(beta).mean(axis=1)
+    else:
+        beta_intensity = np.abs(beta)
+
+    color_gamma = '#1E88E5'
+    color_beta = '#E53935'
+    markevery = max(1, len(time) // 10)
+
+    ax.plot(time, gamma_intensity, color=color_gamma, linewidth=2.5,
+            label=r'$|\gamma|$ (scale magnitude)', marker='s', markersize=4,
+            markevery=markevery)
+    ax.plot(time, beta_intensity, color=color_beta, linewidth=2.5,
+            label=r'$|\beta|$ (shift magnitude)', marker='^', markersize=4,
+            markevery=markevery)
+
+    ax.fill_between(time, 0, gamma_intensity, color=color_gamma, alpha=0.1)
+    ax.fill_between(time, 0, beta_intensity, color=color_beta, alpha=0.1)
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Mean Absolute FiLM Parameters', fontsize=12, fontweight='bold')
+    ax.set_title('FiLM Modulation Intensity over Time (DeepFiLM)', fontsize=13, fontweight='bold', pad=15)
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax.grid(False)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
 def load_logs_from_npz(npz_path):
     """从.npz文件加载日志数据"""
     data = np.load(npz_path, allow_pickle=True)

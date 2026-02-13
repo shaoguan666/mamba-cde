@@ -265,6 +265,8 @@ def visualize_results(result, dataset_name, output_path, device, model_name):
         paper_plots.plot_mechanism_dynamics(logs, save_dir=output_dir)
     elif model_name == 'ncde-mamba':
         paper_plots.plot_mamba_dynamics(logs, save_dir=output_dir)
+    elif model_name == 'ncde-deepfilm':
+        paper_plots.plot_deepfilm_dynamics(logs, save_dir=output_dir)
     else:
         print(f"[WARNING] 未知的模型类型: {model_name}")
         return
