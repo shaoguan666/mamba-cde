@@ -10,7 +10,11 @@
       "Bash(\"d:\\\\实验室\\\\mamba-cde\\\\.conda\\\\python.exe\" -c \"import torch; print\\(''torch OK''\\); from sktime.datasets import load_from_tsfile_to_dataframe; print\\(''sktime OK''\\)\")",
       "Bash(conda run:*)",
       "Bash(dir:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(python3:*)"
     ]
   }
 }

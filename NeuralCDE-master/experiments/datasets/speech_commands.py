@@ -4,6 +4,7 @@ import urllib.request
 import tarfile
 import torch
 import torchaudio
+from tqdm import tqdm
 
 from . import common
 
@@ -27,30 +28,52 @@ def download():
 
 def _process_data(intensity_data):
     base_loc = here / 'data' / 'SpeechCommands'
-    X = torch.empty(34975, 16000, 1)
-    y = torch.empty(34975, dtype=torch.long)
 
-    batch_index = 0
-    y_index = 0
-    for foldername in ('yes', 'no', 'up', 'down', 'left', 'right', 'on', 'off', 'stop', 'go'):
+    folders = ('yes', 'no', 'up', 'down', 'left', 'right', 'on', 'off', 'stop', 'go')
+    all_files = []
+    for foldername in folders:
         loc = base_loc / foldername
         for filename in os.listdir(loc):
-            audio, _ = torchaudio.load_wav(loc / filename, channels_first=False,
-                                           normalization=False)  # for forward compatbility if they fix it
-            audio = audio / 2 ** 15  # Normalization argument doesn't seem to work so we do it manually.
+            all_files.append((foldername, filename))
 
-            # A few samples are shorter than the full length; for simplicity we discard them.
-            if len(audio) != 16000:
-                continue
+    y_map = {name: i for i, name in enumerate(folders)}
 
-            X[batch_index] = audio
-            y[batch_index] = y_index
-            batch_index += 1
-        y_index += 1
+    # Load audio and compute MFCC in batches to avoid OOM
+    mfcc_transform = torchaudio.transforms.MFCC(log_mels=True, n_mfcc=20,
+                                                melkwargs=dict(n_fft=200, n_mels=64))
+    mfcc_chunks = []
+    y_list = []
+    batch_size = 2000
+    audio_batch = []
+
+    for foldername, filename in tqdm(all_files, desc="Loading audio"):
+        loc = base_loc / foldername
+        audio, _ = torchaudio.load(loc / filename)
+        audio = audio.squeeze(0)  # [channels, samples] -> [samples]
+        if audio.dtype == torch.int16:
+            audio = audio.float() / 2 ** 15
+        elif audio.abs().max() > 1.0:
+            audio = audio / 2 ** 15
+
+        if len(audio) != 16000:
+            continue
+
+        audio_batch.append(audio)
+        y_list.append(y_map[foldername])
+
+        if len(audio_batch) >= batch_size:
+            batch_tensor = torch.stack(audio_batch)
+            mfcc_chunks.append(mfcc_transform(batch_tensor).transpose(1, 2).detach())
+            audio_batch = []
+
+    if audio_batch:
+        batch_tensor = torch.stack(audio_batch)
+        mfcc_chunks.append(mfcc_transform(batch_tensor).transpose(1, 2).detach())
+
+    X = torch.cat(mfcc_chunks, dim=0)
+    y = torch.tensor(y_list, dtype=torch.long)
+    batch_index = X.size(0)
     assert batch_index == 34975, "batch_index is {}".format(batch_index)
-
-    X = torchaudio.transforms.MFCC(log_mels=True, n_mfcc=20,
-                                   melkwargs=dict(n_fft=200, n_mels=64))(X.squeeze(-1)).transpose(1, 2).detach()
     # X is of shape (batch=34975, length=161, channels=20)
 
     times = torch.linspace(0, X.size(1) - 1, X.size(1))

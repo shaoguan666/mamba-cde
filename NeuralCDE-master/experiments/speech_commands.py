@@ -1,5 +1,5 @@
 import common
-import datasets
+import datasets.speech_commands
 
 
 def main(device='cuda', max_epochs=200, *,                                        # training parameters
@@ -14,6 +14,10 @@ def main(device='cuda', max_epochs=200, *,                                      
     times, train_dataloader, val_dataloader, test_dataloader = datasets.speech_commands.get_data(intensity_data,
                                                                                                  batch_size)
     input_channels = 1 + (1 + intensity_data) * 20
+
+    # Set time_aware=True for time-modulated models
+    if model_name in ('ncde-film', 'ncde-spectral', 'ncde-spectral-v2', 'ncde-mamba', 'ncde-deepfilm', 'ncde-lowrankode-film'):
+        kwargs['time_aware'] = True
 
     make_model = common.make_model(model_name, input_channels, 10, hidden_channels, hidden_hidden_channels,
                                    num_hidden_layers, use_intensity=False, initial=True)

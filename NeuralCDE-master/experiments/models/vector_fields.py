@@ -737,3 +737,435 @@ class DeepFiLMVectorField(torch.nn.Module):
             })
 
         return out
+
+
+class DeepMLPVectorField(torch.nn.Module):
+    """Ablation: Deep MLP without FiLM or Dropout.
+
+    Stateless vector field f(z) - no time dependence.
+    Used to isolate whether FiLM time-modulation drives DeepFiLM's improvement.
+    """
+
+    def __init__(self, input_channels, hidden_channels,
+                 hidden_hidden_channels=64, num_hidden_layers=4):
+        super(DeepMLPVectorField, self).__init__()
+
+        self.input_channels = input_channels
+        self.hidden_channels = hidden_channels
+        self.hidden_hidden_channels = hidden_hidden_channels
+        self.num_hidden_layers = num_hidden_layers
+
+        self.linear_in = torch.nn.Linear(hidden_channels, hidden_hidden_channels)
+        self.linears = torch.nn.ModuleList([
+            torch.nn.Linear(hidden_hidden_channels, hidden_hidden_channels)
+            for _ in range(num_hidden_layers - 1)
+        ])
+        self.linear_out = torch.nn.Linear(hidden_hidden_channels,
+                                          input_channels * hidden_channels)
+
+        torch.nn.init.xavier_uniform_(self.linear_out.weight, gain=0.1)
+        torch.nn.init.zeros_(self.linear_out.bias)
+
+    def extra_repr(self):
+        return ("input_channels: {}, hidden_channels: {}, "
+                "hidden_hidden_channels: {}, num_hidden_layers: {}").format(
+                    self.input_channels, self.hidden_channels,
+                    self.hidden_hidden_channels, self.num_hidden_layers)
+
+    def forward(self, z):
+        h = self.linear_in(z)
+        h = torch.relu(h)
+        for linear in self.linears:
+            h = linear(h)
+            h = torch.relu(h)
+        out = self.linear_out(h)
+        out = out.view(*z.shape[:-1], self.hidden_channels, self.input_channels)
+        return torch.tanh(out)
+
+
+class DeepMLPDropoutVectorField(torch.nn.Module):
+    """Ablation: Deep MLP with Dropout but without FiLM.
+
+    Stateless vector field f(z) - no time dependence.
+    Used to isolate regularization contribution from FiLM time-modulation.
+    """
+
+    def __init__(self, input_channels, hidden_channels,
+                 hidden_hidden_channels=64, num_hidden_layers=4, dropout=0.2):
+        super(DeepMLPDropoutVectorField, self).__init__()
+
+        self.input_channels = input_channels
+        self.hidden_channels = hidden_channels
+        self.hidden_hidden_channels = hidden_hidden_channels
+        self.num_hidden_layers = num_hidden_layers
+        self.dropout_p = dropout
+
+        self.linear_in = torch.nn.Linear(hidden_channels, hidden_hidden_channels)
+        self.linears = torch.nn.ModuleList([
+            torch.nn.Linear(hidden_hidden_channels, hidden_hidden_channels)
+            for _ in range(num_hidden_layers - 1)
+        ])
+        self.linear_out = torch.nn.Linear(hidden_hidden_channels,
+                                          input_channels * hidden_channels)
+        self.dropout = torch.nn.Dropout(dropout)
+
+        torch.nn.init.xavier_uniform_(self.linear_out.weight, gain=0.1)
+        torch.nn.init.zeros_(self.linear_out.bias)
+
+    def extra_repr(self):
+        return ("input_channels: {}, hidden_channels: {}, "
+                "hidden_hidden_channels: {}, num_hidden_layers: {}, dropout: {:.2f}").format(
+                    self.input_channels, self.hidden_channels,
+                    self.hidden_hidden_channels, self.num_hidden_layers, self.dropout_p)
+
+    def forward(self, z):
+        h = self.linear_in(z)
+        h = torch.relu(h)
+        h = self.dropout(h)
+        for linear in self.linears:
+            h = linear(h)
+            h = torch.relu(h)
+            h = self.dropout(h)
+        out = self.linear_out(h)
+        out = out.view(*z.shape[:-1], self.hidden_channels, self.input_channels)
+        return torch.tanh(out)
+
+
+class LowRankODE_FiLM_VectorField(torch.nn.Module):
+    """Low-Rank ODE-Enhanced FiLM Vector Field.
+
+    Combines Mode-Mamba-TS's structured state dynamics with DeepFiLM's proven architecture.
+
+    Architecture:
+        1. SSM Structured Branch (Mode-Mamba-TS inspired):
+           - S4D diagonal base matrix A_base = -exp(A_log)
+           - Time-varying low-rank perturbation: A(t) = A_base + alpha * U(t) @ V(t)^T
+           - Selective gating: gate(z) * A(t) @ h
+
+        2. DeepFiLM Branch (proven AUROC 0.903):
+           - Multi-layer MLP with per-layer FiLM modulation
+           - Per-layer dropout for regularization
+           - Tanh-bounded output
+
+        3. Fusion:
+           - SSM features injected via residual at Layer 1
+           - h_layer1 = (1 + gamma_1) * (h + h_ssm) + beta_1
+
+    Key Design Principles:
+        - Stateless: f(t, z) only, compatible with ODE solvers
+        - Small perturbation (alpha=0.05): SSM augments, doesn't replace
+        - Low-rank (r=4): Parameter-efficient state interaction
+        - Selective gating: Input-dependent activation of structured dynamics
+
+    Parameters:
+        - SSM components: ~16K additional params
+        - DeepFiLM base: ~240K params
+        - Total: ~256K params (+6.6% overhead)
+
+    Expected Performance:
+        - Target AUROC: 0.905-0.915 (beat DeepFiLM 0.903)
+        - Risk: Low (small perturbation, safe fallback to DeepFiLM)
+    """
+
+    def __init__(self, input_channels, hidden_channels, time_dim=32,
+                 hidden_hidden_channels=49, num_hidden_layers=4,
+                 dropout=0.2, r_rank=4):
+        """
+        Arguments:
+            input_channels: Number of input channels (control signal X).
+            hidden_channels: Number of hidden channels (state z dimension).
+            time_dim: Dimension of time encoding (default 32).
+            hidden_hidden_channels: Hidden layer dimension (default 49).
+            num_hidden_layers: Number of hidden layers (default 4).
+            dropout: Dropout probability (default 0.2).
+            r_rank: Rank of low-rank factorization (default 4).
+        """
+        super(LowRankODE_FiLM_VectorField, self).__init__()
+
+        self.input_channels = input_channels
+        self.hidden_channels = hidden_channels
+        self.time_dim = time_dim
+        self.hidden_hidden_channels = hidden_hidden_channels
+        self.num_hidden_layers = num_hidden_layers
+        self.dropout_p = dropout
+        self.r_rank = r_rank
+
+        # === Time Encoder (from DeepFiLM) ===
+        self.time_encoder = TimeEncoder(time_dim)
+
+        # === SSM Structured Dynamics (Mode-Mamba-TS inspired) ===
+        # S4D diagonal base initialization: A_log = log([1, 2, 3, ..., d])
+        A_diag = torch.arange(1, hidden_hidden_channels + 1, dtype=torch.float32)
+        self.A_log = torch.nn.Parameter(torch.log(A_diag))
+        self.A_log._no_weight_decay = True  # Mark for optimizer
+
+        # Low-rank perturbation scale (small initialization)
+        self.alpha = torch.nn.Parameter(torch.tensor(0.05))
+
+        # Time-conditioned low-rank factors: U(t), V(t)
+        # u_proj: time_enc [time_dim] -> U [hidden_hidden_channels * r_rank]
+        self.u_proj = torch.nn.Linear(time_dim, hidden_hidden_channels * r_rank, bias=False)
+        # v_proj: time_enc [time_dim] -> V [r_rank * hidden_hidden_channels]
+        self.v_proj = torch.nn.Linear(time_dim, r_rank * hidden_hidden_channels, bias=False)
+
+        # Selective gating (Mamba-inspired): gate = sigmoid(W_g @ z)
+        # Projects from z-space to h-space for gating
+        self.gate_proj = torch.nn.Linear(hidden_channels, hidden_hidden_channels)
+
+        # === DeepFiLM Components (proven architecture) ===
+        self.linear_in = torch.nn.Linear(hidden_channels, hidden_hidden_channels)
+
+        # Multi-layer MLP
+        self.linears = torch.nn.ModuleList([
+            torch.nn.Linear(hidden_hidden_channels, hidden_hidden_channels)
+            for _ in range(num_hidden_layers - 1)
+        ])
+
+        # Per-layer FiLM generators
+        self.film_generators = torch.nn.ModuleList([
+            torch.nn.Linear(time_dim, 2 * hidden_hidden_channels)
+            for _ in range(num_hidden_layers)
+        ])
+
+        # Per-layer dropout
+        self.dropout = torch.nn.Dropout(dropout)
+
+        # Output projection
+        self.linear_out = torch.nn.Linear(hidden_hidden_channels,
+                                         input_channels * hidden_channels)
+
+        # === Initialization ===
+        self._init_weights()
+
+        # === Logging system for visualization ===
+        self.logging_enabled = False
+        self.logs = []
+
+    def _init_weights(self):
+        """Initialize weights for stable training.
+
+        Strategy:
+            - SSM: small random init for U, V projections
+            - Gate: small init (near 0.5 after sigmoid)
+            - FiLM: identity transform (gamma=0, beta=0)
+            - alpha: 0.05 (small SSM contribution)
+            - Output: small gain (0.1)
+        """
+        # U, V projections: small random initialization
+        torch.nn.init.xavier_uniform_(self.u_proj.weight, gain=0.02)
+        torch.nn.init.xavier_uniform_(self.v_proj.weight, gain=0.02)
+
+        # Gate projection: init to give ~0.5 after sigmoid
+        torch.nn.init.zeros_(self.gate_proj.weight)
+        torch.nn.init.zeros_(self.gate_proj.bias)
+
+        # FiLM generators: identity transform
+        for film_gen in self.film_generators:
+            torch.nn.init.zeros_(film_gen.weight)
+            torch.nn.init.zeros_(film_gen.bias)
+
+        # Output: small initialization
+        torch.nn.init.xavier_uniform_(self.linear_out.weight, gain=0.1)
+        torch.nn.init.zeros_(self.linear_out.bias)
+
+    def extra_repr(self):
+        return (f"input_channels={self.input_channels}, "
+                f"hidden_channels={self.hidden_channels}, "
+                f"time_dim={self.time_dim}, "
+                f"hidden_hidden_channels={self.hidden_hidden_channels}, "
+                f"num_hidden_layers={self.num_hidden_layers}, "
+                f"r_rank={self.r_rank}, "
+                f"dropout={self.dropout_p:.2f}")
+
+    def set_logging(self, enabled):
+        """Enable/disable logging for visualization."""
+        self.logging_enabled = enabled
+        if enabled:
+            self.logs = []
+
+    def clear_logs(self):
+        """Clear all stored logs."""
+        self.logs = []
+
+    def extract_logs(self):
+        """Extract logged data as NumPy arrays for visualization.
+
+        IMPORTANT: This method automatically clears logs after extraction to prevent contamination.
+        Time series are sorted by time to handle ODE solver step rejections.
+
+        Returns:
+            Dictionary containing:
+                - 'time': time points [T]
+                - 'gamma': FiLM gamma params [T, D]
+                - 'beta': FiLM beta params [T, D]
+                - 'alpha': SSM scale factor [T]
+                - 'gate_mean': Mean gate activation [T]
+                - 'A_base': S4D diagonal values [D]
+                - 'ssm_norm': L2 norm of SSM features [T]
+                - 'mlp_norm': L2 norm of MLP features [T]
+        """
+        import numpy as np
+
+        if not self.logs:
+            return {
+                'time': np.array([]),
+                'gamma': np.array([]),
+                'beta': np.array([]),
+                'alpha': np.array([]),
+                'gate_mean': np.array([]),
+                'A_base': np.array([]),
+                'ssm_norm': np.array([]),
+                'mlp_norm': np.array([]),
+            }
+
+        # Sort logs by time to handle ODE solver step rejections
+        sorted_logs = sorted(self.logs, key=lambda x: x['time'])
+
+        result = {
+            'time': np.array([log['time'] for log in sorted_logs]),
+            'gamma': np.stack([log['gamma'] for log in sorted_logs], axis=0),
+            'beta': np.stack([log['beta'] for log in sorted_logs], axis=0),
+            'alpha': np.array([log['alpha'] for log in sorted_logs]),
+            'gate_mean': np.array([log['gate_mean'] for log in sorted_logs]),
+            'A_base': sorted_logs[0]['A_base'],  # Constant across time
+            'ssm_norm': np.array([log['ssm_norm'] for log in sorted_logs]),
+            'mlp_norm': np.array([log['mlp_norm'] for log in sorted_logs]),
+        }
+
+        # CRITICAL: Clear logs after extraction to prevent contamination
+        self.logs = []
+
+        return result
+
+    def forward(self, t, z):
+        """
+        Arguments:
+            t: Current time (scalar or [batch]).
+            z: Hidden state of shape [batch, hidden_channels] or [..., hidden_channels].
+
+        Returns:
+            Vector field of shape [..., hidden_channels, input_channels].
+        """
+        batch_shape = z.shape[:-1]
+        batch_size = z.shape[0] if z.dim() > 1 else 1
+
+        # === Time Encoding ===
+        # Handle scalar time: expand to batch size
+        if t.dim() == 0:
+            t_expanded = t.expand(batch_size)
+        else:
+            t_expanded = t
+
+        time_enc = self.time_encoder(t_expanded)  # [batch, time_dim=32]
+
+        # === Generate FiLM parameters for all layers ===
+        film_params_all = [fg(time_enc) for fg in self.film_generators]
+        # Each: [batch, 2 * hidden_hidden_channels]
+
+        # Broadcast FiLM params if z has extra batch dimensions
+        if z.dim() > 2:
+            extra_dims = z.dim() - 2
+            film_params_broadcast = []
+            for fp in film_params_all:
+                for _ in range(extra_dims):
+                    fp = fp.unsqueeze(1)
+                film_params_broadcast.append(fp)
+            film_params_all = film_params_broadcast
+
+        # === Project to Hidden Space ===
+        h = self.linear_in(z)  # [..., hidden_hidden_channels=49]
+
+        # === SSM Structured Dynamics ===
+        # A_base: S4D diagonal [hidden_hidden_channels]
+        A_base = -torch.exp(self.A_log.float())  # Negative for stability
+
+        # Time-varying low-rank factors U(t), V(t)
+        U_flat = self.u_proj(time_enc)  # [batch, hidden_hidden_channels * r_rank]
+        V_flat = self.v_proj(time_enc)  # [batch, r_rank * hidden_hidden_channels]
+
+        # Reshape to matrix form
+        U = U_flat.view(batch_size, self.hidden_hidden_channels, self.r_rank)
+        # U: [batch, 49, 4]
+        V = V_flat.view(batch_size, self.r_rank, self.hidden_hidden_channels)
+        # V: [batch, 4, 49]
+
+        # Compute structured dynamics: h_ssm = A_base * h + alpha * U @ V^T @ h
+        # Step 1: A_base * h (element-wise, A_base is diagonal)
+        h_diag = A_base * h  # [batch, 49]
+
+        # Step 2: Low-rank correction via U @ (V @ h)
+        # V @ h: project h to low-rank space [batch, r_rank]
+        Vh = torch.bmm(V, h.unsqueeze(-1)).squeeze(-1)
+        # V: [batch, 4, 49] @ h: [batch, 49, 1] = [batch, 4, 1] -> [batch, 4]
+
+        # U @ (V @ h): project back to hidden space [batch, hidden_hidden_channels]
+        UVh = torch.bmm(U, Vh.unsqueeze(-1)).squeeze(-1)
+        # U: [batch, 49, 4] @ Vh: [batch, 4, 1] = [batch, 49, 1] -> [batch, 49]
+
+        # CRITICAL: Bound low-rank perturbation to [-1, 1] for ODE stability
+        # This prevents SSM branch from causing vector field divergence
+        UVh = torch.tanh(UVh)
+
+        # Combine: h_ssm = diag + bounded_low_rank
+        h_ssm = h_diag + self.alpha * UVh  # [batch, 49]
+
+        # === Selective Gating (Mamba-inspired) ===
+        # Gate depends on original state z (input-dependent selectivity)
+        gate = torch.sigmoid(self.gate_proj(z))  # [batch, 49]
+        h_ssm = gate * h_ssm  # Apply gate
+
+        # === DeepFiLM Layers with SSM Injection ===
+        # Layer 0: Inject SSM features via residual
+        gamma_0 = film_params_all[0][..., :self.hidden_hidden_channels]
+        beta_0 = film_params_all[0][..., self.hidden_hidden_channels:]
+
+        h = (1 + gamma_0) * (h + h_ssm) + beta_0  # SSM injection here!
+        h = torch.relu(h)
+        h = self.dropout(h)
+
+        # Layers 1..N-1: Standard DeepFiLM
+        for i, linear in enumerate(self.linears):
+            gamma_i = film_params_all[i + 1][..., :self.hidden_hidden_channels]
+            beta_i = film_params_all[i + 1][..., self.hidden_hidden_channels:]
+
+            h = linear(h)
+            h = (1 + gamma_i) * h + beta_i
+            h = torch.relu(h)
+            h = self.dropout(h)
+
+        # === Output ===
+        out = self.linear_out(h)  # [batch, hidden_channels * input_channels]
+        out = out.view(*batch_shape, self.hidden_channels, self.input_channels)
+        out = torch.tanh(out)  # CRITICAL: bounded for ODE stability
+
+        # === Logging (if enabled) ===
+        if self.logging_enabled:
+            # Extract time value
+            time_log = t.item() if t.dim() == 0 else t[0].item()
+
+            # Log FiLM parameters (first layer, batch mean)
+            gamma_log = gamma_0.mean(dim=0).detach().cpu().numpy()
+            beta_log = beta_0.mean(dim=0).detach().cpu().numpy()
+
+            # Log SSM parameters
+            alpha_log = self.alpha.item()
+            gate_mean_log = gate.mean().item()
+            A_base_log = A_base.detach().cpu().numpy()
+
+            # Log branch norms (before fusion)
+            h_mlp_norm = torch.norm(h, p=2, dim=-1).mean().item()
+            h_ssm_unfused = h_diag + self.alpha * UVh  # Before gating
+            ssm_norm_log = torch.norm(h_ssm_unfused, p=2, dim=-1).mean().item()
+
+            self.logs.append({
+                'time': time_log,
+                'gamma': gamma_log,
+                'beta': beta_log,
+                'alpha': alpha_log,
+                'gate_mean': gate_mean_log,
+                'A_base': A_base_log,
+                'ssm_norm': ssm_norm_log,
+                'mlp_norm': h_mlp_norm,
+            })
+
+        return out

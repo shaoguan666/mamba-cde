@@ -2,6 +2,24 @@ import torch
 import torchdiffeq
 
 
+class _NFEWrapper(torch.nn.Module):
+    """Wraps a vector field to count Number of Function Evaluations (NFE).
+
+    Usage:
+        nfe_counter = []
+        out = cdeint(..., nfe_counter=nfe_counter)
+        print(nfe_counter[0])  # NFE for this call
+    """
+    def __init__(self, func):
+        super(_NFEWrapper, self).__init__()
+        self.func = func
+        self.nfe = 0
+
+    def forward(self, t, z):
+        self.nfe += 1
+        return self.func(t, z)
+
+
 class VectorField(torch.nn.Module):
     def __init__(self, dX_dt, func):
         """Defines a controlled vector field.
@@ -58,7 +76,7 @@ class TimeAwareVectorField(torch.nn.Module):
         return out
 
 
-def cdeint(dX_dt, z0, func, t, adjoint=True, time_aware=False, **kwargs):
+def cdeint(dX_dt, z0, func, t, adjoint=True, time_aware=False, nfe_counter=None, **kwargs):
     r"""Solves a system of controlled differential equations.
 
     Solves the controlled problem:
@@ -115,7 +133,7 @@ def cdeint(dX_dt, z0, func, t, adjoint=True, time_aware=False, **kwargs):
         raise ValueError("func did not return a tensor with the same number of hidden channels as z0. func returned "
                          "shape {} (meaning {} channels), whilst z0 has shape {} (meaning {} channels)."
                          "".format(tuple(vector_field_check.shape), vector_field_check.size(-2), tuple(z0.shape),
-                                   z0.shape.size(-1)))
+                                   z0.size(-1)))
     if vector_field_check.size(-1) != control_gradient.size(-1):
         raise ValueError("func did not return a tensor with the same number of input channels as dX_dt returned. "
                          "func returned shape {} (meaning {} channels), whilst dX_dt returned shape {} (meaning {}"
@@ -134,6 +152,11 @@ def cdeint(dX_dt, z0, func, t, adjoint=True, time_aware=False, **kwargs):
     else:
         vector_field = VectorField(dX_dt=dX_dt, func=func)
 
-    out = odeint(func=vector_field, y0=z0, t=t, **kwargs)
+    if nfe_counter is not None:
+        wrapped = _NFEWrapper(vector_field)
+        out = odeint(func=wrapped, y0=z0, t=t, **kwargs)
+        nfe_counter.append(wrapped.nfe)
+    else:
+        out = odeint(func=vector_field, y0=z0, t=t, **kwargs)
 
     return out

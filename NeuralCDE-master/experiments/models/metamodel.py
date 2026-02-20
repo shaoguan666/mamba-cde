@@ -93,7 +93,11 @@ class NeuralCDE(torch.nn.Module):
 
         # Figure out what times we need to solve for
         if stream:
-            t = times
+            # Truncate to the maximum final_index in the batch to avoid
+            # integrating all 168 steps for patients with short stays.
+            # Ensure at least 2 time points so odeint is valid.
+            max_idx = max(final_index.max().item(), 1)
+            t = times[:max_idx + 1]
         else:
             # faff around to make sure that we're outputting at all the times we need for final_index.
             sorted_final_index, inverse_final_index = final_index.unique(sorted=True, return_inverse=True)
@@ -129,6 +133,16 @@ class NeuralCDE(torch.nn.Module):
             # z_t is a tensor of shape (times, ..., channels), so change this to (..., times, channels)
             for i in range(len(z_t.shape) - 2, 0, -1):
                 z_t = z_t.transpose(0, i)
+            pred_y = self.linear(z_t)  # (..., max_idx+1, output_channels)
+            # Pad the time dimension back to full length so output shape matches true_y.
+            # Loss mask (true_y >= 0) will ignore the zero-padded positions.
+            full_len = len(times)
+            pad_len = full_len - pred_y.size(-2)
+            if pad_len > 0:
+                pad = torch.zeros(*pred_y.shape[:-2], pad_len, pred_y.size(-1),
+                                  dtype=pred_y.dtype, device=pred_y.device)
+                pred_y = torch.cat([pred_y, pad], dim=-2)
+            return pred_y
         else:
             # final_index is a tensor of shape (...)
             # z_t is a tensor of shape (times, ..., channels)

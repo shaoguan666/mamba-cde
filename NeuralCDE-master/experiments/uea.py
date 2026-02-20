@@ -1,9 +1,9 @@
 import common
-import datasets
+import datasets.uea
 
 
 def main(dataset_name, missing_rate=0.3,                                          # dataset parameters
-         device='cuda', max_epochs=1000, *,                                       # training parameters
+         device='cuda', max_epochs=200, *,                                       # training parameters
          model_name, hidden_channels, hidden_hidden_channels, num_hidden_layers,  # model parameters
          dry_run=False,
          **kwargs):                                                               # kwargs passed on to cdeint
@@ -29,7 +29,7 @@ def main(dataset_name, missing_rate=0.3,                                        
                                    num_hidden_layers, use_intensity=False, initial=True)
 
     # Set time_aware=True for time-modulated models
-    if model_name in ('ncde-film', 'ncde-spectral'):
+    if model_name in ('ncde-film', 'ncde-spectral', 'ncde-deepfilm'):
         kwargs['time_aware'] = True
 
     if dry_run:

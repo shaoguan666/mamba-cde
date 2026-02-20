@@ -616,6 +616,325 @@ def _plot_deepfilm_modulation_intensity(time, gamma, beta, save_path):
     plt.close()
 
 
+def plot_speech_confusion_matrix(y_true, y_pred, save_dir='./figures',
+                                  class_names=None):
+    """Plot confusion matrix for Speech Commands (10-class) classification.
+
+    Arguments:
+        y_true: numpy array of true labels [N]
+        y_pred: numpy array of predicted labels [N]
+        save_dir: directory to save figure
+        class_names: list of class names (default: 10 speech commands)
+    """
+    from sklearn.metrics import confusion_matrix
+
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'fig_speech_confusion_matrix.pdf')
+
+    if class_names is None:
+        class_names = ['yes', 'no', 'up', 'down', 'left',
+                       'right', 'on', 'off', 'stop', 'go']
+
+    cm = confusion_matrix(y_true, y_pred)
+    # Normalize by row (true label)
+    cm_norm = cm.astype(float) / (cm.sum(axis=1, keepdims=True) + 1e-8)
+
+    fig, ax = plt.subplots(figsize=(8, 7), dpi=300)
+
+    im = ax.imshow(cm_norm, interpolation='nearest', cmap='Blues',
+                   vmin=0.0, vmax=1.0)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label('Proportion', fontsize=11, fontweight='bold')
+
+    n_classes = len(class_names)
+    ax.set_xticks(range(n_classes))
+    ax.set_yticks(range(n_classes))
+    ax.set_xticklabels(class_names, fontsize=10, rotation=45, ha='right')
+    ax.set_yticklabels(class_names, fontsize=10)
+
+    # Annotate cells with counts and percentages
+    thresh = cm_norm.max() / 2.0
+    for i in range(n_classes):
+        for j in range(n_classes):
+            color = 'white' if cm_norm[i, j] > thresh else 'black'
+            text = '{}\n({:.0f}%)'.format(cm[i, j], cm_norm[i, j] * 100)
+            ax.text(j, i, text, ha='center', va='center',
+                    fontsize=8, color=color, fontweight='bold')
+
+    ax.set_xlabel('Predicted Label', fontsize=12, fontweight='bold')
+    ax.set_ylabel('True Label', fontsize=12, fontweight='bold')
+    ax.set_title('Confusion Matrix (Speech Commands)', fontsize=13,
+                 fontweight='bold', pad=15)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # Print per-class accuracy
+    per_class_acc = cm_norm.diagonal()
+    print("[OK] Confusion matrix saved: {}".format(save_path))
+    print("     Per-class accuracy:")
+    for name, acc in zip(class_names, per_class_acc):
+        print("       {}: {:.1f}%".format(name, acc * 100))
+    print("     Overall accuracy: {:.1f}%".format(
+        cm.diagonal().sum() / cm.sum() * 100))
+
+    return save_path
+
+
+def plot_ablation_bar(results, save_dir='./figures', metric_name='AUROC'):
+    """Plot ablation study bar chart for CCF-B paper.
+
+    Arguments:
+        results: ordered dict of {model_label: metric_value}
+                 e.g. {'Baseline NCDE': 0.8986, 'Deep MLP': 0.889,
+                        'Deep MLP + Dropout': 0.895, 'DeepFiLM (Ours)': 0.903}
+        save_dir: directory to save figure
+        metric_name: y-axis label (default 'AUROC')
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'fig_ablation_bar.pdf')
+
+    labels = list(results.keys())
+    values = list(results.values())
+    n = len(labels)
+
+    # Color scheme: last bar (ours) is highlighted
+    colors = ['#95a5a6'] * (n - 1) + ['#2c3e50']
+    edge_colors = ['#7f8c8d'] * (n - 1) + ['#1a252f']
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+
+    bars = ax.bar(range(n), values, color=colors, edgecolor=edge_colors,
+                  linewidth=1.2, width=0.55, zorder=3)
+
+    # Annotate value on top of each bar
+    for bar, val in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2.0, val + 0.001,
+                '{:.4f}'.format(val), ha='center', va='bottom',
+                fontsize=10, fontweight='bold')
+
+    # Dashed reference line at baseline
+    baseline = values[0]
+    ax.axhline(y=baseline, color='#c0392b', linestyle='--', linewidth=1.2,
+               alpha=0.7, label='Baseline ({:.4f})'.format(baseline))
+
+    ax.set_xticks(range(n))
+    ax.set_xticklabels(labels, fontsize=10, rotation=15, ha='right')
+    ax.set_ylabel(metric_name, fontsize=12, fontweight='bold')
+    ax.set_title('Ablation Study: Component Contribution', fontsize=13,
+                 fontweight='bold', pad=12)
+
+    # Tight y-axis range to amplify differences
+    y_min = min(values) - 0.01
+    y_max = max(values) + 0.015
+    ax.set_ylim(y_min, y_max)
+    ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.3f'))
+
+    ax.legend(fontsize=10, framealpha=0.9)
+    ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print("Ablation bar chart saved: {}".format(save_path))
+    return save_path
+
+
+def plot_nfe_comparison(nfe_data, save_dir='./figures'):
+    """Plot NFE (Number of Function Evaluations) boxplot for CCF-B paper.
+
+    Arguments:
+        nfe_data: dict of {model_label: list_of_nfe_values}
+                  e.g. {'Baseline NCDE': [120, 132, ...], 'DeepFiLM': [115, 128, ...]}
+        save_dir: directory to save figure
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'fig_nfe_boxplot.pdf')
+
+    labels = list(nfe_data.keys())
+    data = [nfe_data[k] for k in labels]
+    n = len(labels)
+
+    colors = ['#95a5a6'] * (n - 1) + ['#2c3e50']
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    bp = ax.boxplot(data, patch_artist=True, notch=False,
+                    medianprops=dict(color='white', linewidth=2))
+
+    for patch, color in zip(bp['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.85)
+
+    for whisker in bp['whiskers']:
+        whisker.set(color='#555555', linewidth=1.2)
+    for cap in bp['caps']:
+        cap.set(color='#555555', linewidth=1.2)
+    for flier in bp['fliers']:
+        flier.set(marker='o', color='#555555', alpha=0.5, markersize=4)
+
+    ax.set_xticks(range(1, n + 1))
+    ax.set_xticklabels(labels, fontsize=10, rotation=15, ha='right')
+    ax.set_ylabel('NFE (Number of Function Evaluations)', fontsize=11,
+                  fontweight='bold')
+    ax.set_title('ODE Solver Efficiency Comparison', fontsize=13,
+                 fontweight='bold', pad=12)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print("NFE boxplot saved: {}".format(save_path))
+    return save_path
+
+
+def plot_tsne_trajectory(result, device='cuda', save_dir='./figures',
+                          n_samples=600, time_aware=True):
+    """Plot t-SNE visualization of hidden state trajectories at multiple time points.
+
+    Extracts z(t_0), z(t_mid), z(t_end) from the NeuralCDE hidden state
+    and applies t-SNE to show class separation evolution over time.
+
+    Arguments:
+        result: experiment result dict from common.main()
+                must have: model, times, test_dataloader
+        device: computation device
+        save_dir: directory to save figure
+        n_samples: max samples per time-point to use for t-SNE
+        time_aware: whether the model uses time-aware CDE (default True for DeepFiLM)
+    """
+    try:
+        from sklearn.manifold import TSNE
+    except ImportError:
+        print("[ERROR] scikit-learn required for t-SNE. Install: pip install scikit-learn")
+        return None
+
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'fig_tsne_trajectory.pdf')
+
+    model = result.model.to(device)
+    times = result.times.to(device)
+    test_dataloader = result.test_dataloader
+    kwargs = {'time_aware': time_aware} if time_aware else {}
+
+    # Navigate model hierarchy to get the inner NeuralCDE
+    # Chain: _SqueezeEnd -> InitialValueNetwork -> NeuralCDE
+    inner = model
+    while hasattr(inner, 'model'):
+        inner = inner.model
+    ncde_model = inner  # Should be NeuralCDE at this point
+
+    # Collect hidden trajectories via forward hook on ncde_model.linear
+    # With stream=True, input[0] to linear has shape (batch, T, hidden_channels)
+    hidden_list = []
+    label_list = []
+
+    hook_handle = ncde_model.linear.register_forward_hook(
+        lambda mod, inp, out: hidden_list.append(inp[0].detach().cpu())
+    )
+
+    model.eval()
+    with torch.no_grad():
+        total_collected = 0
+        for batch in test_dataloader:
+            if total_collected >= n_samples:
+                break
+            batch = tuple(b.to(device) for b in batch)
+            *coeffs, true_y, lengths = batch
+
+            try:
+                # stream=True returns all intermediate hidden states
+                _ = model(times, coeffs, lengths, stream=True, **kwargs)
+                label_list.append(true_y.detach().cpu())
+                total_collected += true_y.shape[0]
+            except Exception:
+                # Fallback: some model wrappers may not support stream=True cleanly
+                pass
+
+    hook_handle.remove()
+    model.to('cpu')
+
+    if not hidden_list:
+        print("[WARNING] No hidden states collected. Skipping t-SNE.")
+        return None
+
+    # hidden_list: list of (batch, T, hidden_channels) or (batch, hidden_channels)
+    # For stream=True the shape should be (batch, T, hidden_channels)
+    all_hidden = torch.cat(hidden_list, dim=0)   # (N, T, H) or (N, H)
+    all_labels = torch.cat(label_list, dim=0).numpy()  # (N,)
+
+    if all_hidden.dim() == 2:
+        print("[WARNING] Got 2D hidden states - stream=True may not have worked. "
+              "Plotting single time-point t-SNE.")
+        z_points = [all_hidden.numpy()]
+        point_labels = ['t_final']
+        time_colors = ['#2c3e50']
+    else:
+        T = all_hidden.shape[1]
+        t0_idx = 0
+        tmid_idx = T // 2
+        tend_idx = T - 1
+
+        z_points = [
+            all_hidden[:, t0_idx, :].numpy(),
+            all_hidden[:, tmid_idx, :].numpy(),
+            all_hidden[:, tend_idx, :].numpy(),
+        ]
+        point_labels = ['t = t_0', 't = t_mid', 't = t_end']
+        time_colors = ['#3498db', '#e67e22', '#2ecc71']
+
+    # Subsample if too large
+    N = min(n_samples, all_hidden.shape[0])
+    idx = np.random.choice(all_hidden.shape[0], N, replace=False)
+    all_labels = all_labels[idx]
+
+    fig, axes = plt.subplots(1, len(z_points), figsize=(5 * len(z_points), 4.5))
+    if len(z_points) == 1:
+        axes = [axes]
+
+    class_colors = {0: '#3498db', 1: '#e74c3c'}
+    class_names = {0: 'Sepsis Neg.', 1: 'Sepsis Pos.'}
+
+    for ax, z, tlabel in zip(axes, z_points, point_labels):
+        z_sub = z[idx]
+
+        print("  Running t-SNE for {} ({} samples, {} dims)...".format(
+            tlabel, N, z_sub.shape[1]))
+        tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, N // 4),
+                    n_iter=1000)
+        z_2d = tsne.fit_transform(z_sub)
+
+        for cls in [0, 1]:
+            mask = all_labels == cls
+            ax.scatter(z_2d[mask, 0], z_2d[mask, 1],
+                       c=class_colors[cls], label=class_names[cls],
+                       alpha=0.55, s=12, linewidths=0)
+
+        ax.set_title(tlabel, fontsize=12, fontweight='bold')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.legend(fontsize=9, loc='best', framealpha=0.85)
+        ax.set_aspect('equal', 'box')
+        for spine in ax.spines.values():
+            spine.set_linewidth(1.2)
+
+    fig.suptitle('Hidden State t-SNE Trajectory (DeepFiLM)', fontsize=13,
+                 fontweight='bold', y=1.01)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print("t-SNE trajectory saved: {}".format(save_path))
+    return save_path
+
+
 def load_logs_from_npz(npz_path):
     """从.npz文件加载日志数据"""
     data = np.load(npz_path, allow_pickle=True)
@@ -718,6 +1037,556 @@ def run_dummy_experiment():
 
     print("\n提示: 这是使用模拟数据生成的演示图表")
     print("      实际使用时请传入真实的训练日志")
+
+
+def plot_lowrankode_dynamics(logs, save_dir='./figures'):
+    """
+    Generate 4 paper-quality figures for LowRankODE-FiLM internal dynamics.
+
+    Arguments:
+        logs (dict): Log data from LowRankODE_FiLM_VectorField.extract_logs(), containing:
+            - 'time': time points [T]
+            - 'gamma': FiLM gamma [T, D]
+            - 'beta': FiLM beta [T, D]
+            - 'alpha': SSM scale factor [T]
+            - 'gate_mean': mean gate activation [T]
+            - 'A_base': S4D diagonal [D]
+            - 'ssm_norm': SSM branch L2 norm [T]
+            - 'mlp_norm': MLP branch L2 norm [T]
+        save_dir (str): Directory to save figures.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    time = _to_numpy(logs.get('time', logs.get('t', None)))
+    if time is None or len(time) == 0:
+        raise ValueError("Logs must contain 'time' or 't' key with non-empty data")
+
+    gamma = _to_numpy(logs['gamma'])
+    beta = _to_numpy(logs['beta'])
+    alpha = _to_numpy(logs['alpha'])
+    gate_mean = _to_numpy(logs['gate_mean'])
+    A_base = _to_numpy(logs['A_base'])
+    ssm_norm = _to_numpy(logs['ssm_norm'])
+    mlp_norm = _to_numpy(logs['mlp_norm'])
+
+    print("\n" + "=" * 70)
+    print("Generating LowRankODE-FiLM paper figures")
+    print("=" * 70)
+
+    # Fig 1: SSM Structured Dynamics (A_base spectrum + alpha over time)
+    print("\n[1/4] Fig 1: SSM Structured Dynamics...")
+    fig1_path = os.path.join(save_dir, 'fig1_lowrankode_ssm_dynamics.pdf')
+    _plot_lowrankode_ssm_dynamics(time, A_base, alpha, fig1_path)
+    print("      Saved: {}".format(fig1_path))
+
+    # Fig 2: Selective Gating over Time
+    print("[2/4] Fig 2: Selective Gating...")
+    fig2_path = os.path.join(save_dir, 'fig2_lowrankode_gating.pdf')
+    _plot_lowrankode_gating(time, gate_mean, fig2_path)
+    print("      Saved: {}".format(fig2_path))
+
+    # Fig 3: Branch Contributions (SSM vs MLP norms)
+    print("[3/4] Fig 3: Branch Contributions...")
+    fig3_path = os.path.join(save_dir, 'fig3_lowrankode_branch_contributions.pdf')
+    _plot_lowrankode_branches(time, ssm_norm, mlp_norm, fig3_path)
+    print("      Saved: {}".format(fig3_path))
+
+    # Fig 4: FiLM Temporal Adaptation
+    print("[4/4] Fig 4: FiLM Temporal Adaptation...")
+    fig4_path = os.path.join(save_dir, 'fig4_lowrankode_film_adaptation.pdf')
+    _plot_lowrankode_film_adaptation(time, gamma, beta, fig4_path)
+    print("      Saved: {}".format(fig4_path))
+
+    print("\n" + "=" * 70)
+    print("All LowRankODE-FiLM figures generated!")
+    print("Location: {}".format(os.path.abspath(save_dir)))
+    print("=" * 70 + "\n")
+
+
+def _plot_lowrankode_ssm_dynamics(time, A_base, alpha, save_path):
+    """
+    Fig 1: SSM structured dynamics.
+    Left: S4D diagonal spectrum (A_base values)
+    Right: Alpha (low-rank scale) over time
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=300)
+
+    # Left: S4D Diagonal Spectrum
+    indices = np.arange(len(A_base))
+    ax1.bar(indices, A_base, color='#1E88E5', alpha=0.7, edgecolor='black', linewidth=0.8)
+    ax1.axhline(y=0, color='gray', linestyle=':', linewidth=1.2)
+    ax1.set_xlabel('State Dimension Index', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('A_base Value (S4D Init)', fontsize=12, fontweight='bold')
+    ax1.set_title('S4D Diagonal Base Matrix', fontsize=13, fontweight='bold', pad=15)
+    ax1.grid(False)
+    ax1.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    # Right: Alpha over time
+    markevery = max(1, len(time) // 10)
+    ax2.plot(time, alpha, color='#E53935', linewidth=2.5, marker='o',
+             markersize=4, markevery=markevery, label=r'$\alpha$ (low-rank scale)')
+    ax2.fill_between(time, 0, alpha, color='#E53935', alpha=0.15)
+    ax2.axhline(y=0.05, color='gray', linestyle='--', linewidth=1.2,
+                alpha=0.5, label='Initial value (0.05)')
+    ax2.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax2.set_ylabel(r'$\alpha$ Value', fontsize=12, fontweight='bold')
+    ax2.set_title('Low-Rank Perturbation Scale', fontsize=13, fontweight='bold', pad=15)
+    ax2.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax2.grid(False)
+    ax2.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_lowrankode_gating(time, gate_mean, save_path):
+    """
+    Fig 2: Selective gating over time.
+    Shows mean gate activation (how much SSM features are used).
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    markevery = max(1, len(time) // 10)
+    ax.plot(time, gate_mean, color='#43A047', linewidth=2.5, marker='s',
+            markersize=4, markevery=markevery, label='Mean Gate Activation')
+    ax.fill_between(time, 0, gate_mean, color='#43A047', alpha=0.15)
+    ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1.2,
+               alpha=0.5, label='50% activation')
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Gate Value (0=off, 1=on)', fontsize=12, fontweight='bold')
+    ax.set_title('Selective Gating: SSM Activation over Time', fontsize=13, fontweight='bold', pad=15)
+    ax.set_ylim([-0.05, 1.05])
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax.grid(False)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_lowrankode_branches(time, ssm_norm, mlp_norm, save_path):
+    """
+    Fig 3: Branch contributions.
+    Shows SSM vs MLP branch L2 norms to visualize which dominates over time.
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    markevery = max(1, len(time) // 10)
+
+    ax.plot(time, ssm_norm, color='#1E88E5', linewidth=2.5, marker='o',
+            markersize=4, markevery=markevery, label='SSM Branch (structured)')
+    ax.fill_between(time, 0, ssm_norm, color='#1E88E5', alpha=0.1)
+
+    ax.plot(time, mlp_norm, color='#FFC107', linewidth=2.5, marker='^',
+            markersize=4, markevery=markevery, label='MLP Branch (unstructured)')
+    ax.fill_between(time, 0, mlp_norm, color='#FFC107', alpha=0.1)
+
+    # Contribution ratio
+    ratio = ssm_norm / (mlp_norm + 1e-8)
+    ax_ratio = ax.twinx()
+    ax_ratio.plot(time, ratio, color='#9C27B0', linewidth=2.0, linestyle=':',
+                  marker='D', markersize=3, markevery=markevery, label='SSM/MLP ratio')
+    ax_ratio.set_ylabel('SSM/MLP Ratio', fontsize=11, fontweight='bold', color='#9C27B0')
+    ax_ratio.tick_params(axis='y', labelcolor='#9C27B0', labelsize=10)
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel('L2 Norm of Features', fontsize=12, fontweight='bold')
+    ax.set_title('Branch Contributions: SSM vs MLP', fontsize=13, fontweight='bold', pad=15)
+
+    # Combine legends
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax_ratio.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, loc='best', fontsize=10, framealpha=0.9)
+
+    ax.grid(False)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def _plot_lowrankode_film_adaptation(time, gamma, beta, save_path):
+    """
+    Fig 4: FiLM temporal adaptation (same as DeepFiLM but for LowRankODE-FiLM).
+    """
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=300)
+
+    if len(gamma.shape) > 1:
+        gamma_mean = gamma.mean(axis=1)
+        gamma_std = gamma.std(axis=1)
+    else:
+        gamma_mean = gamma
+        gamma_std = None
+
+    if len(beta.shape) > 1:
+        beta_mean = beta.mean(axis=1)
+        beta_std = beta.std(axis=1)
+    else:
+        beta_mean = beta
+        beta_std = None
+
+    color_gamma = '#1E88E5'
+    color_beta = '#FFC107'
+    markevery = max(1, len(time) // 10)
+
+    ax.plot(time, gamma_mean, color=color_gamma, linewidth=2.5,
+            label=r'$\bar{\gamma}$ (scale)', marker='s', markersize=4,
+            markevery=markevery)
+    if gamma_std is not None:
+        ax.fill_between(time, gamma_mean - gamma_std, gamma_mean + gamma_std,
+                        color=color_gamma, alpha=0.15)
+
+    ax.plot(time, beta_mean, color=color_beta, linewidth=2.5,
+            label=r'$\bar{\beta}$ (shift)', marker='^', markersize=4,
+            markevery=markevery)
+    if beta_std is not None:
+        ax.fill_between(time, beta_mean - beta_std, beta_mean + beta_std,
+                        color=color_beta, alpha=0.15)
+
+    ax.axhline(y=0.0, color='gray', linestyle=':', linewidth=1.2, alpha=0.5)
+
+    ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+    ax.set_ylabel('FiLM Parameters (Layer 0)', fontsize=12, fontweight='bold')
+    ax.set_title('FiLM Temporal Adaptation (LowRankODE-FiLM)', fontsize=13, fontweight='bold', pad=15)
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax.grid(False)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_main_results(results_by_dataset, save_dir='./figures', metric='auroc'):
+    """Plot grouped bar chart comparing models across datasets.
+
+    Arguments:
+        results_by_dataset: nested dict
+            {dataset_name: {model_name: (mean, std)}}
+            e.g. {
+                'Sepsis': {
+                    'NCDE': (0.8986, 0.003),
+                    'ODE-RNN': (0.877, 0.004),
+                    'GRU-ODE': (0.869, 0.005),
+                    'DeepFiLM (Ours)': (0.903, 0.002),
+                },
+                'Decompensation': {...},
+            }
+        save_dir: directory to save figures
+        metric: metric name for y-axis label (e.g. 'auroc' or 'auprc')
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    metric_upper = metric.upper()
+    save_path = os.path.join(save_dir, 'fig_main_results_{}.pdf'.format(metric))
+
+    datasets = list(results_by_dataset.keys())
+    # Infer model order from first dataset
+    models = list(results_by_dataset[datasets[0]].keys())
+    n_datasets = len(datasets)
+    n_models = len(models)
+
+    # Color palette: grey tones for baselines, dark for ours (last model)
+    palette = ['#aab4c4', '#7f8fa6', '#525f7f', '#2c3e50']
+    colors = [palette[i % len(palette)] for i in range(n_models - 1)] + ['#c0392b']
+    hatch_patterns = ['', '///', '\\\\\\', 'xxx', '...']
+
+    x = np.arange(n_datasets)
+    total_width = 0.72
+    bar_width = total_width / n_models
+    offsets = np.linspace(-(total_width - bar_width) / 2,
+                           (total_width - bar_width) / 2, n_models)
+
+    fig, ax = plt.subplots(figsize=(max(5, 2.5 * n_datasets), 5), dpi=300)
+
+    for i, (model, color) in enumerate(zip(models, colors)):
+        means = []
+        stds = []
+        for ds in datasets:
+            val = results_by_dataset[ds].get(model, (0.0, 0.0))
+            means.append(val[0])
+            stds.append(val[1])
+
+        bars = ax.bar(x + offsets[i], means, bar_width,
+                      label=model, color=color,
+                      hatch=hatch_patterns[i % len(hatch_patterns)],
+                      edgecolor='white', linewidth=0.8,
+                      yerr=stds, capsize=3,
+                      error_kw=dict(elinewidth=1.2, ecolor='#444444'))
+
+        # Annotate value on each bar
+        for bar, m in zip(bars, means):
+            ax.text(bar.get_x() + bar.get_width() / 2.0,
+                    bar.get_height() + max(stds) + 0.003,
+                    '{:.3f}'.format(m),
+                    ha='center', va='bottom', fontsize=7.5, rotation=90,
+                    fontweight='bold')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(datasets, fontsize=12, fontweight='bold')
+    ax.set_ylabel(metric_upper, fontsize=13, fontweight='bold')
+    ax.set_title('Performance Comparison ({})'.format(metric_upper),
+                 fontsize=14, fontweight='bold', pad=14)
+
+    all_means = [v[0] for ds in results_by_dataset.values() for v in ds.values()]
+    y_min = max(0, min(all_means) - 0.03)
+    y_max = min(1.0, max(all_means) + 0.05)
+    ax.set_ylim(y_min, y_max)
+    ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.3f'))
+
+    ax.legend(fontsize=9.5, framealpha=0.92, loc='lower right',
+              edgecolor='#cccccc')
+    ax.grid(axis='y', linestyle='--', alpha=0.35, zorder=0)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis='both', which='major', labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print("Main results chart saved: {}".format(save_path))
+    return save_path
+
+
+def plot_roc_pr_curves(curves_by_model, save_dir='./figures', dataset_name='Sepsis'):
+    """Plot ROC and PR curves side by side for multiple models.
+
+    Arguments:
+        curves_by_model: dict
+            {model_name: {'fpr': array, 'tpr': array, 'auroc': float,
+                          'precision': array, 'recall': array, 'auprc': float}}
+            Obtain these from sklearn.metrics.roc_curve and precision_recall_curve.
+        save_dir: directory to save figures
+        dataset_name: used in title and filename
+    """
+    import sklearn.metrics
+    os.makedirs(save_dir, exist_ok=True)
+    tag = dataset_name.lower().replace(' ', '_')
+    save_path = os.path.join(save_dir, 'fig_roc_pr_{}.pdf'.format(tag))
+
+    palette = ['#7f8fa6', '#525f7f', '#aab4c4', '#c0392b']
+    linestyles = ['--', '-.', ':', '-']
+
+    fig, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(11, 4.5), dpi=300)
+
+    models = list(curves_by_model.keys())
+    for i, model in enumerate(models):
+        d = curves_by_model[model]
+        color = palette[i % len(palette)]
+        ls = linestyles[i % len(linestyles)]
+        lw = 2.8 if i == len(models) - 1 else 1.8
+
+        ax_roc.plot(d['fpr'], d['tpr'], color=color, lw=lw, ls=ls,
+                    label='{} (AUC={:.3f})'.format(model, d['auroc']))
+        ax_pr.plot(d['recall'], d['precision'], color=color, lw=lw, ls=ls,
+                   label='{} (AP={:.3f})'.format(model, d['auprc']))
+
+    # Random baseline
+    ax_roc.plot([0, 1], [0, 1], color='#bbbbbb', lw=1.2, ls=':', label='Random')
+
+    ax_roc.set_xlabel('False Positive Rate', fontsize=12, fontweight='bold')
+    ax_roc.set_ylabel('True Positive Rate', fontsize=12, fontweight='bold')
+    ax_roc.set_title('ROC Curve - {}'.format(dataset_name),
+                     fontsize=13, fontweight='bold', pad=12)
+    ax_roc.legend(fontsize=9, framealpha=0.9, loc='lower right')
+    ax_roc.set_xlim([-0.01, 1.01])
+    ax_roc.set_ylim([-0.01, 1.01])
+    ax_roc.set_aspect('equal')
+    ax_roc.grid(False)
+    ax_roc.tick_params(labelsize=10, width=1.2)
+
+    ax_pr.set_xlabel('Recall', fontsize=12, fontweight='bold')
+    ax_pr.set_ylabel('Precision', fontsize=12, fontweight='bold')
+    ax_pr.set_title('PR Curve - {}'.format(dataset_name),
+                    fontsize=13, fontweight='bold', pad=12)
+    ax_pr.legend(fontsize=9, framealpha=0.9, loc='upper right')
+    ax_pr.set_xlim([-0.01, 1.01])
+    ax_pr.set_ylim([-0.01, 1.01])
+    ax_pr.set_aspect('equal')
+    ax_pr.grid(False)
+    ax_pr.tick_params(labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print("ROC/PR curves saved: {}".format(save_path))
+    return save_path
+
+
+def plot_convergence_curves(history_by_model, save_dir='./figures',
+                             dataset_name='Sepsis', metric='auroc'):
+    """Plot training convergence curves (val metric vs epoch) for multiple models.
+
+    Arguments:
+        history_by_model: dict
+            {model_name: list_of_dicts}
+            Each dict has 'epoch' and the metric key (e.g. 'auroc').
+            This is the 'history' list returned by common._train_loop().
+        save_dir: directory to save figures
+        dataset_name: used in title and filename
+        metric: key to extract from each history entry's val_metrics
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    tag = dataset_name.lower().replace(' ', '_')
+    save_path = os.path.join(save_dir, 'fig_convergence_{}_{}.pdf'.format(tag, metric))
+
+    palette = ['#aab4c4', '#7f8fa6', '#525f7f', '#c0392b']
+    linestyles = ['--', '-.', ':', '-']
+
+    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=300)
+
+    models = list(history_by_model.keys())
+    for i, model in enumerate(models):
+        history = history_by_model[model]
+        epochs = [h.epoch for h in history]
+        values = [getattr(h.val_metrics, metric) for h in history]
+        color = palette[i % len(palette)]
+        ls = linestyles[i % len(linestyles)]
+        lw = 2.5 if i == len(models) - 1 else 1.8
+
+        ax.plot(epochs, values, color=color, lw=lw, ls=ls,
+                label='{} (best={:.4f})'.format(model, max(values)),
+                marker='o' if i == len(models) - 1 else None,
+                markersize=3,
+                markevery=max(1, len(epochs) // 15))
+
+    ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Val {}'.format(metric.upper()), fontsize=12, fontweight='bold')
+    ax.set_title('Convergence Curves - {} ({})'.format(dataset_name, metric.upper()),
+                 fontsize=13, fontweight='bold', pad=12)
+    ax.legend(fontsize=10, framealpha=0.9)
+    ax.grid(axis='y', linestyle='--', alpha=0.3, zorder=0)
+    ax.set_axisbelow(True)
+    ax.tick_params(labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print("Convergence curves saved: {}".format(save_path))
+    return save_path
+
+
+def plot_param_efficiency(model_stats, save_dir='./figures'):
+    """Plot parameter efficiency scatter: #params vs AUROC for all models.
+
+    Arguments:
+        model_stats: list of dicts, each with:
+            {'name': str, 'params': int, 'auroc': float,
+             'auroc_std': float (optional), 'ours': bool}
+        e.g. [
+            {'name': 'NCDE', 'params': 350000, 'auroc': 0.8986, 'ours': False},
+            {'name': 'ODE-RNN', 'params': 420000, 'auroc': 0.877, 'ours': False},
+            {'name': 'GRU-ODE', 'params': 390000, 'auroc': 0.869, 'ours': False},
+            {'name': 'DeepFiLM', 'params': 240000, 'auroc': 0.903, 'ours': True},
+        ]
+        save_dir: directory to save figures
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'fig_param_efficiency.pdf')
+
+    fig, ax = plt.subplots(figsize=(7, 5), dpi=300)
+
+    for stat in model_stats:
+        color = '#c0392b' if stat.get('ours', False) else '#7f8fa6'
+        marker = '*' if stat.get('ours', False) else 'o'
+        size = 220 if stat.get('ours', False) else 90
+        zorder = 5 if stat.get('ours', False) else 3
+
+        std = stat.get('auroc_std', 0.0)
+        ax.errorbar(stat['params'] / 1000, stat['auroc'],
+                    yerr=std, fmt=marker, color=color,
+                    markersize=np.sqrt(size), capsize=4,
+                    elinewidth=1.5, zorder=zorder)
+
+        # Label offset: push 'ours' label up, others right
+        x_off = stat['params'] / 1000 * 0.02
+        y_off = 0.003 if not stat.get('ours', False) else 0.005
+        ax.annotate(stat['name'],
+                    xy=(stat['params'] / 1000, stat['auroc']),
+                    xytext=(stat['params'] / 1000 + x_off,
+                            stat['auroc'] + y_off),
+                    fontsize=10,
+                    fontweight='bold' if stat.get('ours', False) else 'normal',
+                    color=color)
+
+    ax.set_xlabel('Parameters (K)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('AUROC', fontsize=12, fontweight='bold')
+    ax.set_title('Parameter Efficiency Comparison', fontsize=13,
+                 fontweight='bold', pad=12)
+
+    # Pareto frontier annotation
+    all_auroc = [s['auroc'] for s in model_stats]
+    y_min = min(all_auroc) - 0.015
+    y_max = max(all_auroc) + 0.015
+    ax.set_ylim(y_min, y_max)
+    ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.3f'))
+
+    ax.grid(linestyle='--', alpha=0.3, zorder=0)
+    ax.set_axisbelow(True)
+    ax.tick_params(labelsize=10, width=1.2)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print("Parameter efficiency scatter saved: {}".format(save_path))
+    return save_path
+
+
+def generate_all_paper_figures(results, save_dir='./paper_figures'):
+    """Convenience wrapper: generate all paper figures from a results dict.
+
+    Arguments:
+        results: dict with keys:
+            'main_results'   -> input to plot_main_results()
+            'roc_pr'         -> {dataset: input to plot_roc_pr_curves()}
+            'convergence'    -> {dataset: input to plot_convergence_curves()}
+            'param_stats'    -> input to plot_param_efficiency()
+            'ablation'       -> input to plot_ablation_bar()
+            'deepfilm_logs'  -> input to plot_deepfilm_dynamics()
+            'tsne_result'    -> result object for plot_tsne_trajectory()
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    generated = []
+
+    if 'main_results' in results:
+        for metric in ['auroc', 'auprc']:
+            p = plot_main_results(results['main_results'], save_dir, metric)
+            generated.append(p)
+
+    if 'roc_pr' in results:
+        for ds_name, curves in results['roc_pr'].items():
+            p = plot_roc_pr_curves(curves, save_dir, ds_name)
+            generated.append(p)
+
+    if 'convergence' in results:
+        for ds_name, hist in results['convergence'].items():
+            for metric in ['auroc', 'loss']:
+                p = plot_convergence_curves(hist, save_dir, ds_name, metric)
+                generated.append(p)
+
+    if 'param_stats' in results:
+        p = plot_param_efficiency(results['param_stats'], save_dir)
+        generated.append(p)
+
+    if 'ablation' in results:
+        p = plot_ablation_bar(results['ablation'], save_dir)
+        generated.append(p)
+
+    if 'deepfilm_logs' in results:
+        plot_deepfilm_dynamics(results['deepfilm_logs'], save_dir)
+
+    if 'tsne_result' in results:
+        plot_tsne_trajectory(results['tsne_result'], save_dir=save_dir)
+
+    print("\nAll paper figures generated in: {}".format(os.path.abspath(save_dir)))
+    print("Total: {} files".format(len(generated)))
+    return generated
 
 
 def parse_args():
