@@ -54,3 +54,9 @@ NeuralCDE-master/experiments/*.svg
 SMART/
 mimic3-benchmarks/
 mode-mamba-ts/
+physionet.org/
+raw/
+
+# ===== 数据结果文件 =====
+Outcomes-*.txt
+*.pdf

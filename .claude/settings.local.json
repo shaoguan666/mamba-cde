@@ -14,7 +14,9 @@
       "Bash(git remote add:*)",
       "Bash(git add:*)",
       "WebFetch(domain:github.com)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(# 检查decompensation的listfile（作为对比，看mortality缺什么） find \"\"d:/实验室/mamba-cde/mimic3-benchmarks/data/decompensation/\"\" -name \"\"*.csv\"\" -not -path \"\"*/train/*\"\" -not -path \"\"*/test/*\"\")",
+      "Bash(done)"
     ]
   }
 }
