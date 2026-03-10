@@ -51,11 +51,25 @@ NeuralCDE-master/experiments/*.jpg
 NeuralCDE-master/experiments/*.svg
 
 # ===== 大型外部目录 =====
-SMART/
+SMART-original/
 mimic3-benchmarks/
 mode-mamba-ts/
 physionet.org/
 raw/
+
+# ===== SMART 子目录排除 =====
+SMART/data/
+SMART/export/
+SMART/figs/
+SMART/analysis/results/
+__pycache__/
+
+# ===== OMC 工具缓存 =====
+.omc/
+
+# ===== 生成的调试/文本文件 =====
+SMART_DEBUG_REPORT.md
+SMART_text.txt
 
 # ===== 数据结果文件 =====
 Outcomes-*.txt
