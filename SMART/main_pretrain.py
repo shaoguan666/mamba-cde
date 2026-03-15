@@ -228,10 +228,12 @@ if __name__ == "__main__":
                         help='Use SMILEv2Encoder (MNAR attn bias + obs density + cross-attn fusion)')
     parser.add_argument('--use-smile-v2-film', action='store_true', default=False,
                         help='Use SMILEv2FiLMEncoder (SMILEv2 + time-conditional FiLM)')
+    parser.add_argument('--use-smile-lean', action='store_true', default=False,
+                        help='Use SMILELeanEncoder (MNAR cooccur bias + VarAtt FiLM + local obs density)')
     parser.add_argument('--use-mnar', action='store_true', default=False,
                         help='Use simplified MNAREncoder (no curriculum masking)')
-    parser.add_argument('--save-last', action='store_true', default=True,
-                        help='Save final epoch checkpoint instead of best val loss (default: True, because curriculum masking causes loss to monotonically increase)')
+    parser.add_argument('--save-last', action='store_true', default=False,
+                        help='Save final epoch checkpoint instead of best val loss. Pass for non-LoS datasets where curriculum masking causes monotonic loss increase.')
     # SMILE ablation control flags
     parser.add_argument('--smile-no-mnar', action='store_true',
                         help='Disable MissingPatternEncoder (curriculum mask only)')
@@ -242,7 +244,10 @@ if __name__ == "__main__":
     parser.add_argument('--smile-mnar-dropout', type=float, default=0.05,
                         help='MNAR dropout rate (default 0.05)')
     args = parser.parse_args()
-    if args.use_smile_v2_film:
+    if args.use_smile_lean:
+        from models.smart import SMILELeanEncoder as Encoder
+        model_name = 'smart-smile-lean'
+    elif args.use_smile_v2_film:
         from models.smart import SMILEv2FiLMEncoder as Encoder
         model_name = 'smart-smile-v2-film'
     elif args.use_smile_v2:

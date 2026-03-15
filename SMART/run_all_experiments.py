@@ -38,7 +38,7 @@ ALL_DATASETS = [
     'mimic_lengthofstay',
 ]
 ALL_MODELS = ['smart', 'smart-film', 'smart-smile', 'smart-smile-film', 'smart-mnar',
-              'smart-smile-v2', 'smart-smile-v2-film']
+              'smart-smile-v2', 'smart-smile-v2-film', 'smart-smile-lean']
 ALL_SEEDS = [1, 42, 3407, 1234, 2024, 9999]
 
 
@@ -87,6 +87,9 @@ def main():
                         metavar='SEED')
     parser.add_argument('--pretrain-epochs', type=int, default=25)
     parser.add_argument('--finetune-epochs', type=int, default=25)
+    parser.add_argument('--batch-size', type=int, default=256,
+                        help='Batch size per GPU. Paper uses total=256 (4 GPU x 64); '
+                             'single-GPU should use 256 to match effective batch size.')
     parser.add_argument('--pretrain-only', action='store_true',
                         help='Only run pretraining, skip finetuning')
     parser.add_argument('--finetune-only', action='store_true',
@@ -119,10 +122,12 @@ def main():
         use_smile_film_flag    = ['--use-smile-film']    if model == 'smart-smile-film'    else []
         use_smile_v2_film_flag = ['--use-smile-v2-film'] if model == 'smart-smile-v2-film' else []
         use_smile_v2_flag      = ['--use-smile-v2']      if model == 'smart-smile-v2'      else []
+        use_smile_lean_flag    = ['--use-smile-lean']    if model == 'smart-smile-lean'    else []
         use_smile_flag         = ['--use-smile']         if (model.startswith('smart-smile')
                                                              and model not in ('smart-smile-film',
                                                                                'smart-smile-v2',
-                                                                               'smart-smile-v2-film')) else []
+                                                                               'smart-smile-v2-film',
+                                                                               'smart-smile-lean')) else []
         use_mnar_flag          = ['--use-mnar']          if model == 'smart-mnar'          else []
         # Ablation extra flags for smile variants
         smile_extra = []
@@ -143,14 +148,15 @@ def main():
                 print(f'{tag_prefix} | pretrain: SKIP (exists)')
                 skipped_pre += 1
             else:
+                # LoS and Decomp pretrain diverge with curriculum masking; use best checkpoint
+                save_last_flag = [] if dataset in ('mimic_lengthofstay', 'mimic_decompensation') else ['--save-last']
                 cmd = [
                     sys.executable, 'main_pretrain.py',
                     '--dataset', dataset,
                     '--seed', str(seed),
                     '--epochs', str(args.pretrain_epochs),
-                    '--batch_size', '64',
-                    '--save-last',
-                ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_flag + use_mnar_flag + smile_extra
+                    '--batch_size', str(args.batch_size),
+                ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_flag + use_mnar_flag + smile_extra
                 ok = run_cmd(cmd, f'{tag_prefix} | PRETRAIN', args.dry_run)
                 if not ok:
                     failed.append(f'{tag_prefix} pretrain')
@@ -174,8 +180,8 @@ def main():
                 '--dataset', dataset,
                 '--seed', str(seed),
                 '--epochs', str(args.finetune_epochs),
-                '--batch_size', '64',
-            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_flag + use_mnar_flag + smile_extra
+                '--batch_size', str(args.batch_size),
+            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_flag + use_mnar_flag + smile_extra
             ok = run_cmd(cmd, f'{tag_prefix} | FINETUNE', args.dry_run)
             if not ok:
                 failed.append(f'{tag_prefix} finetune')

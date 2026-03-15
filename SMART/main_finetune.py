@@ -101,6 +101,8 @@ if __name__ == "__main__":
                         help='Use SMILEv2Encoder (MNAR attn bias + obs density + cross-attn fusion)')
     parser.add_argument('--use-smile-v2-film', action='store_true', default=False,
                         help='Use SMILEv2FiLMEncoder (SMILEv2 + time-conditional FiLM)')
+    parser.add_argument('--use-smile-lean', action='store_true', default=False,
+                        help='Use SMILELeanEncoder (MNAR cooccur bias + VarAtt FiLM + local obs density)')
     parser.add_argument('--obs-density-window', type=int, default=5,
                         help='Sliding window size for observation density embedding (must be odd)')
     parser.add_argument('--smile-no-mnar', action='store_true', default=False)
@@ -113,7 +115,10 @@ if __name__ == "__main__":
                              'When > 0, linearly decays from this value to 0 over all epochs. '
                              'When 0 (default), uses constant smile-mnar-dropout instead.')
     args = parser.parse_args()
-    if args.use_mnar:
+    if args.use_smile_lean:
+        from models.smart import SMILELeanEncoder as Encoder
+        model_name = 'smart-smile-lean'
+    elif args.use_mnar:
         from models.smart import MNAREncoder as Encoder
         model_name = 'smart-mnar'
     elif args.use_smile_v2_film:

@@ -1382,6 +1382,41 @@ class SMILEv2FiLMBasicBlock(nn.Module):
         return x
 
 
+class SMILELeanBasicBlock(nn.Module):
+    """Lean transformer block: SeqAtt + MNARBiasFiLMVarAtt + standard MLP.
+
+    Keeps the two highest-value improvements from SMILEv2-FiLM:
+      - MNAR co-occurrence attention bias (MNARBiasFiLMVarAttBlock)
+      - Time-conditional FiLM on VarAtt (MNARBiasFiLMVarAttBlock)
+    Removes:
+      - TimeFiLMMLPBlock -> standard MLPBlock (FFN needs no time conditioning)
+      - MNARCrossAttention (per-block MNAR cross-attn removed)
+    """
+
+    def __init__(self, dim, num_heads, time_dim, mlp_ratio=4., qkv_bias=False,
+                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.seq_att_block = SeqAttBlock(
+            dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
+            proj_drop=proj_drop, norm_layer=norm_layer,
+        )
+        self.var_att_block = MNARBiasFiLMVarAttBlock(
+            dim=dim, num_heads=num_heads, time_dim=time_dim,
+            qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
+        )
+        self.mlp = MLPBlock(
+            dim=dim, mlp_ratio=mlp_ratio,
+            proj_drop=proj_drop, act_layer=act_layer, norm_layer=norm_layer,
+        )
+
+    def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, time_enc=None):
+        lens_mask = lens_mask.repeat_interleave(x.shape[1], dim=0)
+        x = self.seq_att_block(x, mask, lens, lens_mask)
+        x = self.var_att_block(x, mask, lens, lens_mask, mnar_cooccur, time_enc)
+        x = self.mlp(x)
+        return x
+
+
 class SMILEv2FiLMEncoder(nn.Module):
     """SMILEv2Encoder augmented with time-conditional FiLM modulation.
 
@@ -1493,5 +1528,77 @@ class SMILEv2FiLMEncoder(nn.Module):
                 (attn_w * mnar_emb).sum(dim=2, keepdim=True)   # (B, V, 1, d)
             )
             x = torch.cat([x[:, :, :1] + global_mnar, x[:, :, 1:]], dim=2)
+
+        return x
+
+
+class SMILELeanEncoder(nn.Module):
+    """Lean encoder: MNAR co-occurrence bias + VarAtt FiLM + local obs density.
+
+    Removes from SMILEv2FiLMEncoder:
+      - MissingPatternEncoder (1D/2D CNN) -- heavy, redundant with MNAR cooccur bias
+      - MNARCrossAttention per block      -- per-layer overhead removed
+      - TimeFiLMMLPBlock -> MLPBlock      -- FFN needs no time conditioning
+      - Global density injection to CLS   -- mean(T) destroys temporal dynamics
+      - Attention-pooled MNAR to CLS      -- manual injection fights Self-Attention
+
+    Keeps:
+      - MNARCooccurrenceEncoder           -- zero-param co-occurrence bias
+      - MNARBiasFiLMVarAttBlock           -- MNAR bias + FiLM on cross-var attention
+      - ObsDensityEmbedder (local only)   -- measurement-freq prior on value embeddings
+      - TimeEncoder                       -- real timestamps for FiLM conditioning
+      - PositionalEncoding                -- sequence order
+    """
+
+    def __init__(self, args):
+        super().__init__()
+        self.time_dim = getattr(args, 'time_dim', 16)
+        self.embedder = MLPEmbedder(args.d_model)
+        self.query = nn.Parameter(torch.zeros(args.input_dim, 1, args.d_model))
+        self.query.data.normal_(mean=0.0, std=0.02)
+        self.position_enc = PositionalEncoding(args.d_model, n_position=args.max_len + 1)
+        self.time_encoder = TimeEncoder(self.time_dim)
+        self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
+        self.obs_density_embedder = ObsDensityEmbedder(
+            args.d_model, window_size=getattr(args, 'obs_density_window', 5)
+        )
+        self.blocks = nn.ModuleList([
+            SMILELeanBasicBlock(
+                dim=args.d_model, num_heads=args.n_heads, time_dim=self.time_dim,
+                mlp_ratio=4., qkv_bias=False, proj_drop=args.dropout,
+            )
+            for _ in range(args.e_layers)
+        ])
+
+    def forward(self, x, lens, mask, time=None, original_mask=None, **kwargs):
+        x = self.embedder(x, mask)                              # (B, V, T, d)
+
+        mnar_cooccur = None
+        if original_mask is not None:
+            obs_density_emb = self.obs_density_embedder(original_mask)  # (B, V, T, d)
+            x = x + obs_density_emb                            # local density injection only
+            mnar_cooccur = self.mnar_cooccur_encoder(original_mask)     # (B, V, V)
+
+        x = torch.cat(
+            (self.query.repeat(x.shape[0], 1, 1, 1), x), dim=2
+        )                                                        # (B, V, T+1, d)
+        x = self.position_enc(x)
+
+        lens_mask = length_to_mask(lens + 1)
+        mask_full = torch.cat(
+            (torch.ones(mask.shape[0], 1, mask.shape[-1],
+                        device=mask.device, dtype=mask.dtype), mask),
+            dim=1,
+        )
+        mask_full = mask_full.transpose(1, 2).float()
+
+        time_enc = None
+        if time is not None:
+            cls_time = torch.zeros(x.shape[0], 1, device=time.device, dtype=time.dtype)
+            time_full = torch.cat([cls_time, time], dim=1)      # (B, T+1)
+            time_enc = self.time_encoder(time_full)              # (B, T+1, time_dim)
+
+        for block in self.blocks:
+            x = block(x, mask_full, lens, lens_mask, mnar_cooccur, time_enc)
 
         return x
