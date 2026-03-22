@@ -38,8 +38,13 @@ ALL_DATASETS = [
     'mimic_lengthofstay',
 ]
 ALL_MODELS = ['smart', 'smart-film', 'smart-smile', 'smart-smile-film', 'smart-mnar',
-              'smart-smile-v2', 'smart-smile-v2-film', 'smart-smile-lean']
+              'smart-smile-v2', 'smart-smile-v2-film', 'smart-smile-lean',
+              'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae',
+              'smart-smile-stratified']
 ALL_SEEDS = [1, 42, 3407, 1234, 2024, 9999]
+# Lean models use batch_size=64 and finetune_epochs=25 (same as smart baseline)
+# and save_best instead of save_last for pretrain checkpointing.
+_LEAN_MODELS = {'smart-smile-lean', 'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae'}
 
 
 def pretrain_ckpt(dataset, model_name, seed):
@@ -75,18 +80,19 @@ def main():
                         choices=ALL_MODELS + [
                             'smart-smile-nomnar', 'smart-smile-norandom',
                             'smart-smile-temporal-only', 'smart-smile-system-only',
-                            'smart-smile-film',
+                            'smart-smile-film', 'smart-smile-stratified',
                         ], metavar='MODEL',
                         help='Models to run. Available: ' + ', '.join(ALL_MODELS + [
                             'smart-smile-nomnar', 'smart-smile-norandom',
                             'smart-smile-temporal-only', 'smart-smile-system-only',
+                            'smart-smile-stratified',
                         ]))
     parser.add_argument('--datasets', nargs='+', default=ALL_DATASETS,
                         choices=ALL_DATASETS, metavar='DATASET')
     parser.add_argument('--seeds', nargs='+', type=int, default=ALL_SEEDS,
                         metavar='SEED')
     parser.add_argument('--pretrain-epochs', type=int, default=25)
-    parser.add_argument('--finetune-epochs', type=int, default=25)
+    parser.add_argument('--finetune-epochs', type=int, default=35)
     parser.add_argument('--batch-size', type=int, default=256,
                         help='Batch size per GPU. Paper uses total=256 (4 GPU x 64); '
                              'single-GPU should use 256 to match effective batch size.')
@@ -122,12 +128,17 @@ def main():
         use_smile_film_flag    = ['--use-smile-film']    if model == 'smart-smile-film'    else []
         use_smile_v2_film_flag = ['--use-smile-v2-film'] if model == 'smart-smile-v2-film' else []
         use_smile_v2_flag      = ['--use-smile-v2']      if model == 'smart-smile-v2'      else []
-        use_smile_lean_flag    = ['--use-smile-lean']    if model == 'smart-smile-lean'    else []
+        use_smile_lean_flag              = ['--use-smile-lean']             if model in ('smart-smile-lean', 'smart-smile-lean-pmae') else []
+        use_smile_lean_samepretrain_flag = ['--use-smile-lean-samepretrain'] if model == 'smart-smile-lean-samepretrain' else []
+        pmae_pretrain_flag               = ['--pretrain-mask-mode', 'proportional_var'] if model == 'smart-smile-lean-pmae' else []
+        pmae_pretrain_dir_flag           = ['--pretrain-dir', os.path.join('./export', dataset, model, f'seed_{seed}')] if model == 'smart-smile-lean-pmae' else []
         use_smile_flag         = ['--use-smile']         if (model.startswith('smart-smile')
                                                              and model not in ('smart-smile-film',
                                                                                'smart-smile-v2',
                                                                                'smart-smile-v2-film',
-                                                                               'smart-smile-lean')) else []
+                                                                               'smart-smile-lean',
+                                                                               'smart-smile-lean-samepretrain',
+                                                                               'smart-smile-lean-pmae')) else []
         use_mnar_flag          = ['--use-mnar']          if model == 'smart-mnar'          else []
         # Ablation extra flags for smile variants
         smile_extra = []
@@ -139,24 +150,32 @@ def main():
             smile_extra = ['--smile-mask-type', 'temporal']
         elif model == 'smart-smile-system-only':
             smile_extra = ['--smile-mask-type', 'system']
+        elif model == 'smart-smile-stratified':
+            smile_extra = ['--smile-stratified']
         tag_prefix = f'[{idx:>2}/{total}] {model:12s} | {dataset:25s} | seed={seed}'
 
         # ---- Pretrain ----
+        # Lean models: batch_size=64, save_best (same setup as smart baseline)
+        cur_batch_size = 64 if model in _LEAN_MODELS else args.batch_size
+        cur_ft_epochs = 25 if model in _LEAN_MODELS else args.finetune_epochs
         if not args.finetune_only:
             pre_ckpt = pretrain_ckpt(dataset, model, seed)
             if not args.force and os.path.exists(pre_ckpt):
                 print(f'{tag_prefix} | pretrain: SKIP (exists)')
                 skipped_pre += 1
             else:
-                # LoS and Decomp pretrain diverge with curriculum masking; use best checkpoint
-                save_last_flag = [] if dataset in ('mimic_lengthofstay', 'mimic_decompensation') else ['--save-last']
+                # LoS/Decomp: save best (curriculum loss stays low); other non-lean: save last
+                # Lean models: save best (random masking; val loss is monotone-friendly)
+                save_last_flag = ([]
+                    if dataset in ('mimic_lengthofstay', 'mimic_decompensation') or model in _LEAN_MODELS
+                    else ['--save-last'])
                 cmd = [
                     sys.executable, 'main_pretrain.py',
                     '--dataset', dataset,
                     '--seed', str(seed),
                     '--epochs', str(args.pretrain_epochs),
-                    '--batch_size', str(args.batch_size),
-                ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_flag + use_mnar_flag + smile_extra
+                    '--batch_size', str(cur_batch_size),
+                ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_flag
                 ok = run_cmd(cmd, f'{tag_prefix} | PRETRAIN', args.dry_run)
                 if not ok:
                     failed.append(f'{tag_prefix} pretrain')
@@ -179,9 +198,9 @@ def main():
                 sys.executable, 'main_finetune.py',
                 '--dataset', dataset,
                 '--seed', str(seed),
-                '--epochs', str(args.finetune_epochs),
-                '--batch_size', str(args.batch_size),
-            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_flag + use_mnar_flag + smile_extra
+                '--epochs', str(cur_ft_epochs),
+                '--batch_size', str(cur_batch_size),
+            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_dir_flag
             ok = run_cmd(cmd, f'{tag_prefix} | FINETUNE', args.dry_run)
             if not ok:
                 failed.append(f'{tag_prefix} finetune')

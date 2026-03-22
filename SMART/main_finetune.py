@@ -55,7 +55,8 @@ def test(args, checkpoint_path, test_dataloader):
         for batch in test_dataloader:
             for key in batch:
                 batch[key] = batch[key].cuda()
-            if args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2 or args.use_smile_v2_film:
+            if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
+                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
                 original_mask = batch['mask'].clone()  # no dropout: test uses clean mask
             else:
                 original_mask = None
@@ -87,6 +88,8 @@ if __name__ == "__main__":
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--save_model', type=bool, default=True)
     parser.add_argument('--save_dir', type=str, default='./export/')
+    parser.add_argument('--pretrain-dir', type=str, default=None,
+                        help='Directory containing pretrained checkpoint-mse.pth. Defaults to save_dir.')
     parser.add_argument('--local-rank', type=int, default=0)
     parser.add_argument('--e_layers', type=int, default=2)
     parser.add_argument('--n_heads', type=int, default=4)
@@ -103,6 +106,8 @@ if __name__ == "__main__":
                         help='Use SMILEv2FiLMEncoder (SMILEv2 + time-conditional FiLM)')
     parser.add_argument('--use-smile-lean', action='store_true', default=False,
                         help='Use SMILELeanEncoder (MNAR cooccur bias + VarAtt FiLM + local obs density)')
+    parser.add_argument('--use-smile-lean-samepretrain', action='store_true', default=False,
+                        help='Use SMILELeanEncoder pretrained with same strategy as smart (random masking)')
     parser.add_argument('--obs-density-window', type=int, default=5,
                         help='Sliding window size for observation density embedding (must be odd)')
     parser.add_argument('--smile-no-mnar', action='store_true', default=False)
@@ -114,8 +119,13 @@ if __name__ == "__main__":
                         help='Initial MNAR dropout for progressive decay schedule. '
                              'When > 0, linearly decays from this value to 0 over all epochs. '
                              'When 0 (default), uses constant smile-mnar-dropout instead.')
+    parser.add_argument('--smile-stratified', action='store_true', default=False,
+                        help='Use pretrained model from stratified masking (Scheme F+D).')
     args = parser.parse_args()
-    if args.use_smile_lean:
+    if args.use_smile_lean_samepretrain:
+        from models.smart import SMILELeanEncoder as Encoder
+        model_name = 'smart-smile-lean-samepretrain'
+    elif args.use_smile_lean:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean'
     elif args.use_mnar:
@@ -137,6 +147,8 @@ if __name__ == "__main__":
             model_name = 'smart-smile-nomnar'
         elif args.smile_no_curriculum:
             model_name = 'smart-smile-norandom'
+        elif args.smile_stratified:
+            model_name = 'smart-smile-stratified'
         elif args.smile_mask_type == 'temporal':
             model_name = 'smart-smile-temporal-only'
         elif args.smile_mask_type == 'system':
@@ -147,7 +159,10 @@ if __name__ == "__main__":
     else:
         from models.smart import Encoder
         model_name = 'smart'
-    args.save_dir = os.path.join(args.save_dir, args.dataset, model_name, f'seed_{args.seed}')
+    if args.pretrain_dir:
+        args.save_dir = args.pretrain_dir
+    else:
+        args.save_dir = os.path.join(args.save_dir, args.dataset, model_name, f'seed_{args.seed}')
     if args.local_rank == 0 and args.save_model and not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
     if args.local_rank == 0:
@@ -260,14 +275,14 @@ if __name__ == "__main__":
         print_metrics = print_metrics_binary
         save_metric = 'auprc'
     
-    checkpoint = torch.load(os.path.join(args.save_dir, 'checkpoint-mse.pth'), weights_only=False)
+    pretrain_dir = args.pretrain_dir if args.pretrain_dir else args.save_dir
+    checkpoint = torch.load(os.path.join(pretrain_dir, 'checkpoint-mse.pth'), weights_only=False)
     save_epoch = checkpoint['epoch']
     log(logger, "last saved model is in epoch {}".format(save_epoch))
     encoder.load_state_dict(checkpoint['encoder'])
 
     best_auc = 0
     best_prc = 0
-    best_mse = 100
     # Progressive MNAR dropout schedule: linear decay from initial to 0 over epochs
     _mnar_initial = args.smile_mnar_dropout_initial if args.smile_mnar_dropout_initial > 0 \
         else args.smile_mnar_dropout
@@ -287,7 +302,8 @@ if __name__ == "__main__":
         for step, batch in enumerate(batch_bar, 1):
             for key in batch:
                 batch[key] = batch[key].cuda()
-            if args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2 or args.use_smile_v2_film:
+            if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
+                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
                 original_mask = apply_mnar_dropout(batch['mask'].clone(), current_mnar_drop)
             else:
                 original_mask = None
@@ -312,7 +328,8 @@ if __name__ == "__main__":
             for batch in val_dataloader:
                 for key in batch:
                     batch[key] = batch[key].cuda()
-                if args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2 or args.use_smile_v2_film:
+                if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
+                        or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
                     original_mask = batch['mask'].clone()  # no dropout: val uses clean mask
                 else:
                     original_mask = None
@@ -328,28 +345,16 @@ if __name__ == "__main__":
         epoch_bar.set_postfix(train=f'{t_loss:.4f}', val=f'{v_loss:.4f}')
         log(logger, 'Epoch %d: Train Loss %.4f, Valid Loss %.4f' % (i, t_loss, v_loss))
         cur_mse = v_loss
-        if save_metric != 'mse':
-            if metrics[save_metric] > best_prc:
-                best_prc = metrics[save_metric]
-                if args.local_rank == 0:
-                    state = {
-                        'encoder': encoder.state_dict(),
-                        'classifier': classifier.state_dict(),
-                        'epoch': i
-                    }
-                    log(logger, f'----- Save best model - {save_metric}: %.4f -----' % metrics[save_metric])
-                    torch.save(state, os.path.join(args.save_dir, 'checkpoint-prc.pth'))
-        else:
-            if metrics[save_metric] < best_mse:
-                best_mse = metrics[save_metric]
-                if args.local_rank == 0:
-                    state = {
-                        'encoder': encoder.state_dict(),
-                        'classifier': classifier.state_dict(),
-                        'epoch': i
-                    }
-                    log(logger, f'----- Save best model - {save_metric}: %.4f -----' % metrics[save_metric])
-                    torch.save(state, os.path.join(args.save_dir, 'checkpoint-prc.pth'))
+        if metrics[save_metric] > best_prc:
+            best_prc = metrics[save_metric]
+            if args.local_rank == 0:
+                state = {
+                    'encoder': encoder.state_dict(),
+                    'classifier': classifier.state_dict(),
+                    'epoch': i
+                }
+                log(logger, f'----- Save best model - {save_metric}: %.4f -----' % metrics[save_metric])
+                torch.save(state, os.path.join(args.save_dir, 'checkpoint-prc.pth'))
         if args.distributed:
             dist.barrier()
 
