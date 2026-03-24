@@ -114,11 +114,19 @@ def load_pickle_data(pkl_path):
     """Load a SMART-format pickle. Returns (x_list, y_list, mask_list)."""
     with open(pkl_path, "rb") as f:
         payload = pickle.load(f)
-    # Determine format: (x, y, static, mask, name) or (x, y, mask, name)
-    if len(payload) == 5:
-        x, y, _static, mask, _name = payload
-    elif len(payload) == 4:
+    # Formats:
+    #   4-elem: (x, y, mask, name)
+    #   5-elem: (x, y, static, mask, name) OR (x, y, mask, name, split_sizes)
+    if len(payload) == 4:
         x, y, mask, _name = payload
+    elif len(payload) == 5:
+        # Distinguish by checking whether element[2] is a list of strings (names)
+        # or arrays (static/mask). If element[3] is a list of strings, it is
+        # (x, y, mask, name, split_sizes); otherwise (x, y, static, mask, name).
+        if isinstance(payload[3], list) and len(payload[3]) > 0 and isinstance(payload[3][0], str):
+            x, y, mask, _name, _splits = payload
+        else:
+            x, y, _static, mask, _name = payload
     else:
         raise ValueError("Unexpected pickle format with %d elements" % len(payload))
     return x, y, mask
@@ -764,6 +772,24 @@ def main():
         (
             "./data/MIMIC-III/mortality_normalized.pkl",
             "MIMIC3_Mortality",
+            MIMIC_FEATURES,
+            MIMIC_SYSTEMS,
+        ),
+        (
+            "./data/MIMIC-III/phenotyping_normalized.pkl",
+            "MIMIC3_Phenotyping",
+            MIMIC_FEATURES,
+            MIMIC_SYSTEMS,
+        ),
+        (
+            "./data/MIMIC-III/decompensation_normalized.pkl",
+            "MIMIC3_Decompensation",
+            MIMIC_FEATURES,
+            MIMIC_SYSTEMS,
+        ),
+        (
+            "./data/MIMIC-III/lengthofstay_normalized.pkl",
+            "MIMIC3_LengthOfStay",
             MIMIC_FEATURES,
             MIMIC_SYSTEMS,
         ),

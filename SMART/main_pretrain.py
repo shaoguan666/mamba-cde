@@ -418,7 +418,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_model', type=bool, default=True)
     parser.add_argument('--save_dir', type=str, default='./export/')
     parser.add_argument('--local-rank', type=int, default=0)
-    parser.add_argument('--min_mask_ratio', type=float, default=0.)
+    parser.add_argument('--min_mask_ratio', type=float, default=0.15)
     parser.add_argument('--max_mask_ratio', type=float, default=0.75)
     parser.add_argument('--e_layers', type=int, default=2)
     parser.add_argument('--n_heads', type=int, default=4)
@@ -503,6 +503,18 @@ if __name__ == "__main__":
     else:
         from models.smart import Encoder
         model_name = 'smart'
+    # Auto-enable save_last for curriculum masking models to avoid
+    # monotonic val-loss increase causing epoch-1 checkpoint selection
+    _uses_curriculum = (
+        not args.use_mnar
+        and not args.use_smile_lean_samepretrain
+        and not args.smile_no_curriculum
+        and not args.smile_stratified
+        and (args.use_smile or args.use_smile_film or args.use_smile_lean
+             or args.use_smile_v2 or args.use_smile_v2_film)
+    )
+    if _uses_curriculum and not args.save_last:
+        args.save_last = True
     if getattr(args, 'pretrain_mask_mode', 'fixed') == 'proportional_var':
         model_name = model_name + '-pmae'
     args.save_dir = os.path.join(args.save_dir, args.dataset, model_name, f'seed_{args.seed}')
