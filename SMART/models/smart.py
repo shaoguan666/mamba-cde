@@ -1039,6 +1039,11 @@ class MNARBiasVarAttention(nn.Module):
 
     mnar_bias_scale is zero-initialized: at init this is identical to VarAttention.
 
+    When time_decay is provided (B, T+1, num_heads), the MNAR bias is scaled
+    per-timestep, enabling temporally-varying co-missingness strength.  Internally,
+    q/k use a size-1 time broadcast dimension so the per-timestep bias naturally
+    produces per-timestep attention weights via broadcasting.
+
     Args:
         dim:       Feature dimension.
         num_heads: Number of attention heads.
@@ -1046,7 +1051,7 @@ class MNARBiasVarAttention(nn.Module):
         proj_drop: Dropout on output projection.
     """
 
-    def __init__(self, dim, num_heads=8, qkv_bias=False, proj_drop=0.):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, proj_drop=0., num_vars=0):
         super().__init__()
         assert dim % num_heads == 0
         self.num_heads = num_heads
@@ -1054,34 +1059,68 @@ class MNARBiasVarAttention(nn.Module):
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        # Per-head MNAR co-occurrence bias scale (zero-init = no bias at init)
-        self.mnar_bias_scale = nn.Parameter(torch.zeros(num_heads))
+        # Per-head per-variable-pair MNAR bias scale (zero-init = no bias at init)
+        if num_vars > 0:
+            self.mnar_bias_scale = nn.Parameter(torch.zeros(num_heads, num_vars, num_vars))
+        else:
+            # Fallback: scalar per-head (legacy / when num_vars unknown)
+            self.mnar_bias_scale = nn.Parameter(torch.zeros(num_heads))
 
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, time_decay=None):
         B, N, P, C = x.shape
         qkv = self.qkv(x).reshape(B, N, P, 3, self.num_heads,
                                    self.head_dim).permute(3, 0, 2, 4, 1, 5)
-        q, k, v = qkv.unbind(0)
+        q, k, v = qkv.unbind(0)  # each: (B, P, heads, N, hdim)
 
-        q = q[:, 0]  # (B, heads, N, head_dim) -- CLS-position query per variable
+        q = q[:, 0]  # (B, heads, N, head_dim) -- CLS-position query
         mask_r = mask.reshape(B, N, P, 1, 1).repeat(1, 1, 1, self.num_heads,
                               self.head_dim).permute(0, 2, 3, 1, 4)
         k = k.masked_fill(~mask_r.bool(), 0).sum(dim=1) / (mask_r.sum(dim=1) + 1e-6)
-        v = v.permute(0, 2, 3, 4, 1).reshape(B, self.num_heads, N, -1)
+        # k: (B, heads, N, head_dim)
 
-        # Build additive attention bias from MNAR co-occurrence
-        attn_mask = None
-        if mnar_cooccur is not None:
-            scale = self.mnar_bias_scale.view(1, -1, 1, 1)
-            if time_decay is not None:
-                # time_decay: (B, num_heads) -- per-sample per-head temporal scaling
-                scale = scale * time_decay.view(B, -1, 1, 1)
-            # (B, V, V) -> (B, heads, V, V) -- added to raw attention logits
-            attn_mask = mnar_cooccur.unsqueeze(1) * scale
+        # Build per-head (optionally per-variable-pair) raw bias
+        # mnar_bias_scale: (heads, V, V) or (heads,)
+        is_pairwise = self.mnar_bias_scale.dim() == 3
 
-        x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        if time_decay is not None and mnar_cooccur is not None:
+            # --- 5-D path: per-timestep MNAR bias via manual attention ---
+            v = v.permute(0, 2, 1, 3, 4)  # (B, heads, P, N, hdim)
 
-        x = x.view(B, self.num_heads, N, -1, P).permute(0, 2, 4, 1, 3).reshape(B, N, P, -1)
+            logits = (q @ k.transpose(-1, -2)) * (self.head_dim ** -0.5)
+            # logits: (B, heads, N, N)
+
+            # time_decay (B, T+1, num_heads) -> (B, heads, T+1, 1, 1)
+            td = time_decay.permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1)
+            if is_pairwise:
+                # (heads, V, V) -> (1, heads, 1, V, V) * (B, heads, T+1, 1, 1)
+                bias_scale = self.mnar_bias_scale.unsqueeze(0).unsqueeze(2) * td
+            else:
+                bias_scale = self.mnar_bias_scale.view(1, -1, 1, 1, 1) * td
+            # mnar_cooccur (B, V, V) -> (B, 1, 1, V, V)
+            attn_bias = mnar_cooccur.unsqueeze(1).unsqueeze(2) * bias_scale
+            # attn_bias: (B, heads, T+1, V, V)
+
+            # logits (B, heads, V, V) -> (B, heads, 1, V, V) + bias -> (B, heads, T+1, V, V)
+            logits_5d = logits.unsqueeze(2) + attn_bias
+            attn_weights = F.softmax(logits_5d, dim=-1)
+            # (B, heads, T+1, V, V) @ (B, heads, P, V, hdim) -> (B, heads, P, V, hdim)
+            x = attn_weights @ v
+            x = x.permute(0, 3, 2, 1, 4).reshape(B, N, P, -1)  # (B, N, P, C)
+        else:
+            # --- 4-D path: no per-timestep bias ---
+            v = v.permute(0, 2, 3, 4, 1).reshape(B, self.num_heads, N, -1)
+
+            attn_mask = None
+            if mnar_cooccur is not None:
+                if is_pairwise:
+                    # (heads, V, V) -> (1, heads, V, V) * (B, 1, V, V)
+                    attn_mask = mnar_cooccur.unsqueeze(1) * self.mnar_bias_scale.unsqueeze(0)
+                else:
+                    scale = self.mnar_bias_scale.view(1, -1, 1, 1)
+                    attn_mask = mnar_cooccur.unsqueeze(1) * scale
+
+            x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+            x = x.view(B, self.num_heads, N, -1, P).permute(0, 2, 4, 1, 3).reshape(B, N, P, -1)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -1091,11 +1130,12 @@ class MNARBiasVarAttBlock(nn.Module):
     """VarAttBlock using MNARBiasVarAttention."""
 
     def __init__(self, dim, num_heads, qkv_bias=False, proj_drop=0.,
-                 norm_layer=nn.LayerNorm):
+                 norm_layer=nn.LayerNorm, num_vars=0):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn_var = MNARBiasVarAttention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, proj_drop=proj_drop
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, proj_drop=proj_drop,
+            num_vars=num_vars,
         )
 
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None):
@@ -1123,10 +1163,11 @@ class ObsDensityEmbedder(nn.Module):
     Output: embedding      (B, V, T, d_model)
     """
 
-    def __init__(self, d_model, window_size=5):
+    def __init__(self, d_model, window_size=5, causal=False):
         super().__init__()
         assert window_size % 2 == 1, "window_size must be odd"
         self.window_size = window_size
+        self.causal = causal
         self.proj = nn.Sequential(
             nn.Linear(1, d_model),
             nn.GELU(),
@@ -1138,9 +1179,17 @@ class ObsDensityEmbedder(nn.Module):
     def forward(self, original_mask):
         B, T, V = original_mask.shape
         m = original_mask.float().permute(0, 2, 1).reshape(B * V, 1, T)  # (B*V, 1, T)
-        density = F.avg_pool1d(
-            m, kernel_size=self.window_size, stride=1, padding=self.window_size // 2
-        )                                                 # (B*V, 1, T)
+        if self.causal:
+            # Causal: pad only on the left (past) side
+            m_padded = F.pad(m, (self.window_size - 1, 0))
+            density = F.avg_pool1d(
+                m_padded, kernel_size=self.window_size, stride=1, padding=0
+            )
+        else:
+            # Bidirectional: symmetric padding
+            density = F.avg_pool1d(
+                m, kernel_size=self.window_size, stride=1, padding=self.window_size // 2
+            )
         density = density.reshape(B, V, T, 1)             # (B, V, T, 1)
         return self.proj(density)                         # (B, V, T, d_model)
 
@@ -1199,7 +1248,7 @@ class SMILEv2BasicBlock(nn.Module):
     """
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, proj_drop=0.,
-                 act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_vars=0):
         super().__init__()
         self.seq_att_block = SeqAttBlock(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
@@ -1208,6 +1257,7 @@ class SMILEv2BasicBlock(nn.Module):
         self.var_att_block = MNARBiasVarAttBlock(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
             proj_drop=proj_drop, norm_layer=norm_layer,
+            num_vars=num_vars,
         )
         self.mlp = MLPBlock(
             dim=dim, mlp_ratio=mlp_ratio, proj_drop=proj_drop,
@@ -1259,14 +1309,18 @@ class SMILEv2Encoder(nn.Module):
             self.mnar_encoder.set_variable_order(args.var_order_idx, args.inv_order_idx)
 
         self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
+        dataset = getattr(args, 'dataset', '')
+        causal = ('lengthofstay' in dataset.lower() or 'decompensation' in dataset.lower())
         self.obs_density_embedder = ObsDensityEmbedder(
-            args.d_model, window_size=getattr(args, 'obs_density_window', 5)
+            args.d_model, window_size=getattr(args, 'obs_density_window', 5),
+            causal=causal,
         )
 
         self.blocks = nn.ModuleList([
             SMILEv2BasicBlock(
                 dim=args.d_model, num_heads=args.n_heads, mlp_ratio=4.,
                 qkv_bias=False, proj_drop=args.dropout,
+                num_vars=args.input_dim,
             )
             for _ in range(args.e_layers)
         ])
@@ -1359,21 +1413,22 @@ class MNARBiasFiLMVarAttBlock(nn.Module):
     FiLM generator is zero-initialized (identity modulation at init).
 
     Args:
-        use_time_mnar: If True, adds a per-head time-decay gate on the MNAR
-            co-occurrence bias.  Projects mean(time_enc) -> num_heads via a
-            sigmoid to produce a (B, heads) scalar that multiplies mnar_bias_scale.
-            Zero-initialized so there is no change at init.  This gives the
-            MNAR bias temporal dynamics: early vs. late co-missingness has
-            different physiological meaning.
+        use_time_mnar: If True, adds a per-head per-timestep time-decay gate on
+            the MNAR co-occurrence bias.  Projects time_enc (B, T+1, time_dim)
+            -> (B, T+1, num_heads) via sigmoid, yielding a per-timestep scaling
+            factor.  Zero-initialized so there is no change at init.  This gives
+            each time step its own MNAR bias strength, preserving temporal
+            sensitivity for rolling prediction tasks (LOS, Decompensation).
     """
 
     def __init__(self, dim, num_heads, time_dim, qkv_bias=False, proj_drop=0.,
-                 norm_layer=nn.LayerNorm, use_time_mnar=False):
+                 norm_layer=nn.LayerNorm, use_time_mnar=False, num_vars=0):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.num_heads = num_heads
         self.attn_var = MNARBiasVarAttention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, proj_drop=proj_drop
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, proj_drop=proj_drop,
+            num_vars=num_vars,
         )
         # Post-attention FiLM: time_enc -> (gamma, beta) over dim; zero-init = identity
         self.film_gen = nn.Linear(time_dim, 2 * dim)
@@ -1389,9 +1444,8 @@ class MNARBiasFiLMVarAttBlock(nn.Module):
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, time_enc=None):
         time_decay = None
         if self.use_time_mnar and time_enc is not None:
-            # mean over T+1 positions to get a per-sample time summary
-            mean_time = time_enc.mean(dim=1)                    # (B, time_dim)
-            time_decay = torch.sigmoid(self.mnar_time_proj(mean_time))  # (B, num_heads)
+            # per-timestep dynamic scaling: (B, T+1, time_dim) -> (B, T+1, num_heads)
+            time_decay = torch.sigmoid(self.mnar_time_proj(time_enc))
         attn_out = self.attn_var(self.norm1(x), mask, lens, lens_mask, mnar_cooccur,
                                  time_decay)
         if time_enc is not None:
@@ -1411,7 +1465,8 @@ class SMILEv2FiLMBasicBlock(nn.Module):
     """
 
     def __init__(self, dim, num_heads, time_dim, mlp_ratio=4., qkv_bias=False,
-                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 num_vars=0):
         super().__init__()
         self.seq_att_block = SeqAttBlock(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
@@ -1420,6 +1475,7 @@ class SMILEv2FiLMBasicBlock(nn.Module):
         self.var_att_block = MNARBiasFiLMVarAttBlock(
             dim=dim, num_heads=num_heads, time_dim=time_dim,
             qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
+            num_vars=num_vars,
         )
         self.mlp = TimeFiLMMLPBlock(
             dim=dim, time_dim=time_dim, mlp_ratio=mlp_ratio,
@@ -1458,7 +1514,8 @@ class SMILELeanBasicBlock(nn.Module):
 
     def __init__(self, dim, num_heads, time_dim, mlp_ratio=4., qkv_bias=False,
                  proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm,
-                 abl_no_film=False, abl_no_mnar_bias=False, abl_no_time_mnar=False):
+                 abl_no_film=False, abl_no_mnar_bias=False, abl_no_time_mnar=False,
+                 num_vars=0):
         super().__init__()
         self.abl_no_film = abl_no_film
         self.abl_no_mnar_bias = abl_no_mnar_bias
@@ -1477,6 +1534,7 @@ class SMILELeanBasicBlock(nn.Module):
                 dim=dim, num_heads=num_heads, time_dim=time_dim,
                 qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
                 use_time_mnar=(not abl_no_time_mnar and not abl_no_mnar_bias),
+                num_vars=num_vars,
             )
         self.mlp = MLPBlock(
             dim=dim, mlp_ratio=mlp_ratio,
@@ -1526,13 +1584,17 @@ class SMILEv2FiLMEncoder(nn.Module):
         if hasattr(args, 'var_order_idx') and hasattr(args, 'inv_order_idx'):
             self.mnar_encoder.set_variable_order(args.var_order_idx, args.inv_order_idx)
         self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
+        dataset = getattr(args, 'dataset', '')
+        causal = ('lengthofstay' in dataset.lower() or 'decompensation' in dataset.lower())
         self.obs_density_embedder = ObsDensityEmbedder(
-            args.d_model, window_size=getattr(args, 'obs_density_window', 5)
+            args.d_model, window_size=getattr(args, 'obs_density_window', 5),
+            causal=causal,
         )
         self.blocks = nn.ModuleList([
             SMILEv2FiLMBasicBlock(
                 dim=args.d_model, num_heads=args.n_heads, time_dim=self.time_dim,
                 mlp_ratio=4., qkv_bias=False, proj_drop=args.dropout,
+                num_vars=args.input_dim,
             )
             for _ in range(args.e_layers)
         ])
@@ -1640,6 +1702,9 @@ class SMILELeanEncoder(nn.Module):
         super().__init__()
         self.time_dim = getattr(args, 'time_dim', 16)
         self.obs_density_window = getattr(args, 'obs_density_window', 5)
+        # Causal density for rolling-prediction tasks (LOS, decompensation)
+        dataset = getattr(args, 'dataset', '')
+        self.causal_density = ('lengthofstay' in dataset.lower() or 'decompensation' in dataset.lower())
         # Ablation flags
         self.abl_no_density = getattr(args, 'abl_no_density', False)
         self.abl_no_mnar_bias = getattr(args, 'abl_no_mnar_bias', False)
@@ -1672,6 +1737,7 @@ class SMILELeanEncoder(nn.Module):
                 abl_no_film=self.abl_no_film,
                 abl_no_mnar_bias=self.abl_no_mnar_bias,
                 abl_no_time_mnar=self.abl_no_time_mnar,
+                num_vars=args.input_dim,
             )
             for _ in range(args.e_layers)
         ])
@@ -1685,7 +1751,13 @@ class SMILELeanEncoder(nn.Module):
                 B_m, T_m, V_m = original_mask.shape
                 ws = self.obs_density_window
                 m = original_mask.float().permute(0, 2, 1).reshape(B_m * V_m, 1, T_m)
-                d = F.avg_pool1d(m, kernel_size=ws, stride=1, padding=ws // 2)
+                if self.causal_density:
+                    # Causal: pad only on the left (past) side
+                    m_padded = F.pad(m, (ws - 1, 0))
+                    d = F.avg_pool1d(m_padded, kernel_size=ws, stride=1, padding=0)
+                else:
+                    # Bidirectional: symmetric padding
+                    d = F.avg_pool1d(m, kernel_size=ws, stride=1, padding=ws // 2)
                 density = d.reshape(B_m, V_m, T_m).permute(0, 2, 1)  # (B, T, V)
             else:
                 density = torch.zeros_like(mask)
