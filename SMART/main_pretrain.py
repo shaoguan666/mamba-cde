@@ -450,6 +450,17 @@ if __name__ == "__main__":
                         help='MNAR dropout rate (default 0.05)')
     parser.add_argument('--obs-density-window', type=int, default=5,
                         help='Sliding window size for observation density embedding (must be odd)')
+    # SMILE-Lean ablation switches
+    parser.add_argument('--abl-no-density', action='store_true', default=False,
+                        help='Ablation: use MLPEmbedder instead of DensityMLPEmbedder')
+    parser.add_argument('--abl-no-mnar-bias', action='store_true', default=False,
+                        help='Ablation: disable MNAR co-occurrence attention bias')
+    parser.add_argument('--abl-no-film', action='store_true', default=False,
+                        help='Ablation: disable time-conditional FiLM on VarAtt')
+    parser.add_argument('--abl-no-time-mnar', action='store_true', default=False,
+                        help='Ablation: disable time-dynamic MNAR scaling only')
+    parser.add_argument('--abl-no-time-pe', action='store_true', default=False,
+                        help='Ablation: disable physical-time positional encoding')
     parser.add_argument('--pretrain-mask-mode', type=str, default='fixed',
                         choices=['fixed', 'proportional_var'],
                         help='fixed=uniform ratio across variables (default); '
@@ -464,12 +475,23 @@ if __name__ == "__main__":
                         help='Custom fixed masking mix (system temporal random), must sum to 1. '
                              'Overrides dataset-adaptive defaults when --smile-stratified is set.')
     args = parser.parse_args()
+    # Build ablation suffix for smile-lean variants
+    _abl_flags = {
+        'no-density': args.abl_no_density,
+        'no-mnar-bias': args.abl_no_mnar_bias,
+        'no-film': args.abl_no_film,
+        'no-time-mnar': args.abl_no_time_mnar,
+        'no-time-pe': args.abl_no_time_pe,
+    }
+    _abl_suffix = '-'.join(k for k, v in _abl_flags.items() if v)
     if args.use_smile_lean_samepretrain:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean-samepretrain'
     elif args.use_smile_lean:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean'
+        if _abl_suffix:
+            model_name = 'smart-smile-lean-' + _abl_suffix
     elif args.use_smile_v2_film:
         from models.smart import SMILEv2FiLMEncoder as Encoder
         model_name = 'smart-smile-v2-film'
@@ -505,6 +527,7 @@ if __name__ == "__main__":
         model_name = 'smart'
     # Auto-enable save_last for curriculum masking models to avoid
     # monotonic val-loss increase causing epoch-1 checkpoint selection
+    
     _uses_curriculum = (
         not args.use_mnar
         and not args.use_smile_lean_samepretrain

@@ -110,6 +110,17 @@ if __name__ == "__main__":
                         help='Use SMILELeanEncoder pretrained with same strategy as smart (random masking)')
     parser.add_argument('--obs-density-window', type=int, default=5,
                         help='Sliding window size for observation density embedding (must be odd)')
+    # SMILE-Lean ablation switches
+    parser.add_argument('--abl-no-density', action='store_true', default=False,
+                        help='Ablation: use MLPEmbedder instead of DensityMLPEmbedder')
+    parser.add_argument('--abl-no-mnar-bias', action='store_true', default=False,
+                        help='Ablation: disable MNAR co-occurrence attention bias')
+    parser.add_argument('--abl-no-film', action='store_true', default=False,
+                        help='Ablation: disable time-conditional FiLM on VarAtt')
+    parser.add_argument('--abl-no-time-mnar', action='store_true', default=False,
+                        help='Ablation: disable time-dynamic MNAR scaling only')
+    parser.add_argument('--abl-no-time-pe', action='store_true', default=False,
+                        help='Ablation: disable physical-time positional encoding')
     parser.add_argument('--smile-no-mnar', action='store_true', default=False)
     parser.add_argument('--smile-no-curriculum', action='store_true', default=False)
     parser.add_argument('--smile-mask-type', choices=['all', 'temporal', 'system'], default='all')
@@ -122,12 +133,23 @@ if __name__ == "__main__":
     parser.add_argument('--smile-stratified', action='store_true', default=False,
                         help='Use pretrained model from stratified masking (Scheme F+D).')
     args = parser.parse_args()
+    # Build ablation suffix for smile-lean variants
+    _abl_flags = {
+        'no-density': args.abl_no_density,
+        'no-mnar-bias': args.abl_no_mnar_bias,
+        'no-film': args.abl_no_film,
+        'no-time-mnar': args.abl_no_time_mnar,
+        'no-time-pe': args.abl_no_time_pe,
+    }
+    _abl_suffix = '-'.join(k for k, v in _abl_flags.items() if v)
     if args.use_smile_lean_samepretrain:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean-samepretrain'
     elif args.use_smile_lean:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean'
+        if _abl_suffix:
+            model_name = 'smart-smile-lean-' + _abl_suffix
     elif args.use_mnar:
         from models.smart import MNAREncoder as Encoder
         model_name = 'smart-mnar'

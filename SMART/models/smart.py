@@ -1449,20 +1449,35 @@ class SMILELeanBasicBlock(nn.Module):
     Removes:
       - TimeFiLMMLPBlock -> standard MLPBlock (FFN needs no time conditioning)
       - MNARCrossAttention (per-block MNAR cross-attn removed)
+
+    Ablation switches:
+      - abl_no_film: disable FiLM on VarAtt (fall back to plain VarAttBlock)
+      - abl_no_mnar_bias: disable MNAR co-occurrence attention bias
+      - abl_no_time_mnar: disable time-dynamic MNAR scaling only
     """
 
     def __init__(self, dim, num_heads, time_dim, mlp_ratio=4., qkv_bias=False,
-                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 abl_no_film=False, abl_no_mnar_bias=False, abl_no_time_mnar=False):
         super().__init__()
+        self.abl_no_film = abl_no_film
+        self.abl_no_mnar_bias = abl_no_mnar_bias
         self.seq_att_block = SeqAttBlock(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
             proj_drop=proj_drop, norm_layer=norm_layer,
         )
-        self.var_att_block = MNARBiasFiLMVarAttBlock(
-            dim=dim, num_heads=num_heads, time_dim=time_dim,
-            qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
-            use_time_mnar=True,
-        )
+        if abl_no_film and abl_no_mnar_bias:
+            # Both disabled: fall back to plain VarAttBlock (no FiLM, no MNAR bias)
+            self.var_att_block = VarAttBlock(
+                dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
+                proj_drop=proj_drop, norm_layer=norm_layer,
+            )
+        else:
+            self.var_att_block = MNARBiasFiLMVarAttBlock(
+                dim=dim, num_heads=num_heads, time_dim=time_dim,
+                qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
+                use_time_mnar=(not abl_no_time_mnar and not abl_no_mnar_bias),
+            )
         self.mlp = MLPBlock(
             dim=dim, mlp_ratio=mlp_ratio,
             proj_drop=proj_drop, act_layer=act_layer, norm_layer=norm_layer,
@@ -1471,7 +1486,12 @@ class SMILELeanBasicBlock(nn.Module):
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, time_enc=None):
         lens_mask = lens_mask.repeat_interleave(x.shape[1], dim=0)
         x = self.seq_att_block(x, mask, lens, lens_mask)
-        x = self.var_att_block(x, mask, lens, lens_mask, mnar_cooccur, time_enc)
+        if self.abl_no_film and self.abl_no_mnar_bias:
+            x = self.var_att_block(x, mask, lens, lens_mask)
+        else:
+            _mnar = None if self.abl_no_mnar_bias else mnar_cooccur
+            _time = None if self.abl_no_film else time_enc
+            x = self.var_att_block(x, mask, lens, lens_mask, _mnar, _time)
         x = self.mlp(x)
         return x
 
@@ -1607,14 +1627,30 @@ class SMILELeanEncoder(nn.Module):
       - DensityMLPEmbedder                -- density as 3rd input feature (not additive)
       - TimeEncoder (dual-track PE)       -- physical time added to x after index PE
       - PositionalEncoding                -- sequence-index sinusoidal PE
+
+    Ablation switches (via args):
+      - abl_no_density:    use MLPEmbedder instead of DensityMLPEmbedder
+      - abl_no_mnar_bias:  disable MNAR co-occurrence attention bias
+      - abl_no_film:       disable time-conditional FiLM on VarAtt
+      - abl_no_time_mnar:  disable time-dynamic MNAR scaling only
+      - abl_no_time_pe:    disable physical-time positional encoding
     """
 
     def __init__(self, args):
         super().__init__()
         self.time_dim = getattr(args, 'time_dim', 16)
         self.obs_density_window = getattr(args, 'obs_density_window', 5)
-        # Density-aware embedder: (value, mask, density) -> d_model
-        self.embedder = DensityMLPEmbedder(args.d_model)
+        # Ablation flags
+        self.abl_no_density = getattr(args, 'abl_no_density', False)
+        self.abl_no_mnar_bias = getattr(args, 'abl_no_mnar_bias', False)
+        self.abl_no_film = getattr(args, 'abl_no_film', False)
+        self.abl_no_time_mnar = getattr(args, 'abl_no_time_mnar', False)
+        self.abl_no_time_pe = getattr(args, 'abl_no_time_pe', False)
+        # Embedder: density-aware or plain
+        if self.abl_no_density:
+            self.embedder = MLPEmbedder(args.d_model)
+        else:
+            self.embedder = DensityMLPEmbedder(args.d_model)
         self.query = nn.Parameter(torch.zeros(args.input_dim, 1, args.d_model))
         self.query.data.normal_(mean=0.0, std=0.02)
         # Sinusoidal PE for sequence index
@@ -1622,35 +1658,42 @@ class SMILELeanEncoder(nn.Module):
         # Learnable time encoder for FiLM conditioning AND dual-track physical-time PE
         self.time_encoder = TimeEncoder(self.time_dim)
         # Project time_enc -> d_model for additive physical-time PE (zero-init)
-        self.time_pe_proj = nn.Linear(self.time_dim, args.d_model)
-        nn.init.zeros_(self.time_pe_proj.weight)
-        nn.init.zeros_(self.time_pe_proj.bias)
-        self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
+        if not self.abl_no_time_pe:
+            self.time_pe_proj = nn.Linear(self.time_dim, args.d_model)
+            nn.init.zeros_(self.time_pe_proj.weight)
+            nn.init.zeros_(self.time_pe_proj.bias)
+        # MNAR co-occurrence encoder (zero-param)
+        if not self.abl_no_mnar_bias:
+            self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
         self.blocks = nn.ModuleList([
             SMILELeanBasicBlock(
                 dim=args.d_model, num_heads=args.n_heads, time_dim=self.time_dim,
                 mlp_ratio=4., qkv_bias=False, proj_drop=args.dropout,
+                abl_no_film=self.abl_no_film,
+                abl_no_mnar_bias=self.abl_no_mnar_bias,
+                abl_no_time_mnar=self.abl_no_time_mnar,
             )
             for _ in range(args.e_layers)
         ])
 
     def forward(self, x, lens, mask, time=None, original_mask=None, **kwargs):
         # Compute local observation density for the embedder
-        # density: (B, T, V) sliding-window proportion of observed steps
-        if original_mask is not None:
-            B_m, T_m, V_m = original_mask.shape
-            ws = self.obs_density_window
-            m = original_mask.float().permute(0, 2, 1).reshape(B_m * V_m, 1, T_m)
-            d = F.avg_pool1d(m, kernel_size=ws, stride=1, padding=ws // 2)
-            density = d.reshape(B_m, V_m, T_m).permute(0, 2, 1)  # (B, T, V)
+        if self.abl_no_density:
+            x = self.embedder(x, mask)                          # (B, V, T, d)
         else:
-            density = torch.zeros_like(mask)
-
-        x = self.embedder(x, mask, density)                     # (B, V, T, d)
+            if original_mask is not None:
+                B_m, T_m, V_m = original_mask.shape
+                ws = self.obs_density_window
+                m = original_mask.float().permute(0, 2, 1).reshape(B_m * V_m, 1, T_m)
+                d = F.avg_pool1d(m, kernel_size=ws, stride=1, padding=ws // 2)
+                density = d.reshape(B_m, V_m, T_m).permute(0, 2, 1)  # (B, T, V)
+            else:
+                density = torch.zeros_like(mask)
+            x = self.embedder(x, mask, density)                 # (B, V, T, d)
 
         mnar_cooccur = None
-        if original_mask is not None:
-            mnar_cooccur = self.mnar_cooccur_encoder(original_mask)     # (B, V, V)
+        if not self.abl_no_mnar_bias and original_mask is not None:
+            mnar_cooccur = self.mnar_cooccur_encoder(original_mask)  # (B, V, V)
 
         x = torch.cat(
             (self.query.repeat(x.shape[0], 1, 1, 1), x), dim=2
@@ -1673,10 +1716,10 @@ class SMILELeanEncoder(nn.Module):
             cls_time = torch.zeros(x.shape[0], 1, device=time.device, dtype=time.dtype)
             time_full = torch.cat([cls_time, time], dim=1)      # (B, T+1)
             time_enc = self.time_encoder(time_full)              # (B, T+1, time_dim)
-            #   2. physical-time PE (tells SeqAtt "this happened at hour h post-admission")
-            #      zero-init -> no contribution at init, learned as training progresses
-            time_pe = self.time_pe_proj(time_enc).unsqueeze(1)  # (B, 1, T+1, d_model)
-            x = x + time_pe
+            #   2. physical-time PE (zero-init -> no contribution at init)
+            if not self.abl_no_time_pe:
+                time_pe = self.time_pe_proj(time_enc).unsqueeze(1)  # (B, 1, T+1, d_model)
+                x = x + time_pe
 
         for block in self.blocks:
             x = block(x, mask_full, lens, lens_mask, mnar_cooccur, time_enc)

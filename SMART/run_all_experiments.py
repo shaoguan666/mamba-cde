@@ -41,10 +41,31 @@ ALL_MODELS = ['smart', 'smart-film', 'smart-smile', 'smart-smile-film', 'smart-m
               'smart-smile-v2', 'smart-smile-v2-film', 'smart-smile-lean',
               'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae',
               'smart-smile-stratified']
+# SMILE-Lean ablation variants (architecture ablation)
+ABLATION_MODELS = [
+    'smart-smile-lean-no-density',
+    'smart-smile-lean-no-mnar-bias',
+    'smart-smile-lean-no-film',
+    'smart-smile-lean-no-time-mnar',
+    'smart-smile-lean-no-time-pe',
+    'smart-smile-lean-no-mnar-bias-no-time-mnar',  # remove all MNAR signals
+]
 ALL_SEEDS = [1, 42, 3407, 1234, 2024, 9999]
 # Lean models use batch_size=64 and finetune_epochs=25 (same as smart baseline)
 # and save_best instead of save_last for pretrain checkpointing.
 _LEAN_MODELS = {'smart-smile-lean', 'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae'}
+# Ablation models also use lean settings
+_LEAN_MODELS.update(ABLATION_MODELS)
+
+# Map ablation model name -> list of --abl-* CLI flags
+_ABLATION_FLAGS = {
+    'smart-smile-lean-no-density':                   ['--abl-no-density'],
+    'smart-smile-lean-no-mnar-bias':                 ['--abl-no-mnar-bias'],
+    'smart-smile-lean-no-film':                      ['--abl-no-film'],
+    'smart-smile-lean-no-time-mnar':                 ['--abl-no-time-mnar'],
+    'smart-smile-lean-no-time-pe':                   ['--abl-no-time-pe'],
+    'smart-smile-lean-no-mnar-bias-no-time-mnar':    ['--abl-no-mnar-bias', '--abl-no-time-mnar'],
+}
 
 
 def pretrain_ckpt(dataset, model_name, seed):
@@ -76,17 +97,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dry-run', action='store_true',
                         help='Print commands without running them')
+    _extra_models = [
+        'smart-smile-nomnar', 'smart-smile-norandom',
+        'smart-smile-temporal-only', 'smart-smile-system-only',
+        'smart-smile-film', 'smart-smile-stratified',
+    ]
     parser.add_argument('--models', nargs='+', default=ALL_MODELS,
-                        choices=ALL_MODELS + [
-                            'smart-smile-nomnar', 'smart-smile-norandom',
-                            'smart-smile-temporal-only', 'smart-smile-system-only',
-                            'smart-smile-film', 'smart-smile-stratified',
-                        ], metavar='MODEL',
-                        help='Models to run. Available: ' + ', '.join(ALL_MODELS + [
-                            'smart-smile-nomnar', 'smart-smile-norandom',
-                            'smart-smile-temporal-only', 'smart-smile-system-only',
-                            'smart-smile-stratified',
-                        ]))
+                        choices=ALL_MODELS + ABLATION_MODELS + _extra_models,
+                        metavar='MODEL',
+                        help='Models to run. Available: ' + ', '.join(
+                            ALL_MODELS + ABLATION_MODELS + _extra_models))
     parser.add_argument('--datasets', nargs='+', default=ALL_DATASETS,
                         choices=ALL_DATASETS, metavar='DATASET')
     parser.add_argument('--seeds', nargs='+', type=int, default=ALL_SEEDS,
@@ -128,17 +148,16 @@ def main():
         use_smile_film_flag    = ['--use-smile-film']    if model == 'smart-smile-film'    else []
         use_smile_v2_film_flag = ['--use-smile-v2-film'] if model == 'smart-smile-v2-film' else []
         use_smile_v2_flag      = ['--use-smile-v2']      if model == 'smart-smile-v2'      else []
-        use_smile_lean_flag              = ['--use-smile-lean']             if model in ('smart-smile-lean', 'smart-smile-lean-pmae') else []
+        _is_lean_ablation = model in _ABLATION_FLAGS
+        use_smile_lean_flag              = ['--use-smile-lean']             if model in ('smart-smile-lean', 'smart-smile-lean-pmae') or _is_lean_ablation else []
         use_smile_lean_samepretrain_flag = ['--use-smile-lean-samepretrain'] if model == 'smart-smile-lean-samepretrain' else []
         pmae_pretrain_flag               = ['--pretrain-mask-mode', 'proportional_var'] if model == 'smart-smile-lean-pmae' else []
         pmae_pretrain_dir_flag           = ['--pretrain-dir', os.path.join('./export', dataset, model, f'seed_{seed}')] if model == 'smart-smile-lean-pmae' else []
+        _lean_exclude = {'smart-smile-film', 'smart-smile-v2', 'smart-smile-v2-film',
+                         'smart-smile-lean', 'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae'}
+        _lean_exclude.update(_ABLATION_FLAGS.keys())
         use_smile_flag         = ['--use-smile']         if (model.startswith('smart-smile')
-                                                             and model not in ('smart-smile-film',
-                                                                               'smart-smile-v2',
-                                                                               'smart-smile-v2-film',
-                                                                               'smart-smile-lean',
-                                                                               'smart-smile-lean-samepretrain',
-                                                                               'smart-smile-lean-pmae')) else []
+                                                             and model not in _lean_exclude) else []
         use_mnar_flag          = ['--use-mnar']          if model == 'smart-mnar'          else []
         # Ablation extra flags for smile variants
         smile_extra = []
@@ -152,6 +171,8 @@ def main():
             smile_extra = ['--smile-mask-type', 'system']
         elif model == 'smart-smile-stratified':
             smile_extra = ['--smile-stratified']
+        # SMILE-Lean architecture ablation flags
+        lean_abl_extra = _ABLATION_FLAGS.get(model, [])
         tag_prefix = f'[{idx:>2}/{total}] {model:12s} | {dataset:25s} | seed={seed}'
 
         # ---- Pretrain ----
@@ -175,7 +196,7 @@ def main():
                     '--seed', str(seed),
                     '--epochs', str(args.pretrain_epochs),
                     '--batch_size', str(cur_batch_size),
-                ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_flag
+                ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_flag + lean_abl_extra
                 ok = run_cmd(cmd, f'{tag_prefix} | PRETRAIN', args.dry_run)
                 if not ok:
                     failed.append(f'{tag_prefix} pretrain')
@@ -200,7 +221,7 @@ def main():
                 '--seed', str(seed),
                 '--epochs', str(cur_ft_epochs),
                 '--batch_size', str(cur_batch_size),
-            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_dir_flag
+            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_dir_flag + lean_abl_extra
             ok = run_cmd(cmd, f'{tag_prefix} | FINETUNE', args.dry_run)
             if not ok:
                 failed.append(f'{tag_prefix} finetune')
