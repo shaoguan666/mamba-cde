@@ -585,7 +585,7 @@ if __name__ == "__main__":
     elif args.dataset == 'mimic_lengthofstay':
         args.input_dim = 17
         args.demo_dim = 0
-        args.num_class = 10
+        args.num_class = 1
         args.max_len = 24
         args.max_mask_ratio = 0.75
         train_dataset, val_dataset, test_dataset = load_mimic_iii_lengthofstay()
