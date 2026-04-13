@@ -17,7 +17,7 @@ data/MIMIC-III/mortality_normalized.pkl
 data/MIMIC-III/phenotyping_normalized.pkl
 data/MIMIC-III/__pycache__/reader.cpython-310.pyc
 data/MIMIC-III/__pycache__/reader.cpython-313.pyc
-export/
+
 figs/
 models/__pycache__/smart.cpython-310.pyc
 models/__pycache__/smart.cpython-313.pyc
