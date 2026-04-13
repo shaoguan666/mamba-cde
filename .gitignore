@@ -59,7 +59,6 @@ raw/
 
 # ===== SMART 子目录排除 =====
 SMART/data/
-SMART/export/
 SMART/figs/
 SMART/analysis/results/
 __pycache__/
