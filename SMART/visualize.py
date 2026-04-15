@@ -362,7 +362,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_heads',   type=int, default=4)
     parser.add_argument('--time_dim',  type=int, default=16)
     parser.add_argument('--dropout',   type=float, default=0.1)
-    parser.add_argument('--batch_size',type=int, default=128)
+    parser.add_argument('--batch_size',type=int, default=64)
     parser.add_argument('--seed',      type=int, default=3407)
     parser.add_argument('--out_dir',   type=str, default=None,
                         help='Output dir for figures (default: ./figs/{dataset}/{model}/seed_{seed})')

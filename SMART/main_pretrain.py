@@ -414,7 +414,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--d_model', type=int, default=32)
     parser.add_argument('--seed', type=int, default=3407) 
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--save_model', type=bool, default=True)
     parser.add_argument('--save_dir', type=str, default='./export/')

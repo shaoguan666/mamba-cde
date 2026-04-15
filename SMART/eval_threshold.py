@@ -85,7 +85,7 @@ def main():
                         default='./export/mimic_decompensation/smart-smile/seed_42')
     parser.add_argument('--checkpoint', type=str, default='checkpoint-prc.pth')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--d_model', type=int, default=32)
     parser.add_argument('--e_layers', type=int, default=2)
     parser.add_argument('--n_heads', type=int, default=4)

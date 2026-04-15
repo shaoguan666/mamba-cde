@@ -51,7 +51,7 @@ ABLATION_MODELS = [
     'smart-smile-lean-no-mnar-bias-no-time-mnar',  # remove all MNAR signals
 ]
 ALL_SEEDS = [1, 42, 3407, 1234, 2024, 9999]
-# Lean models use batch_size=128 and finetune_epochs=25 (same as smart baseline)
+# Lean models use batch_size=64 and finetune_epochs=25 (same as smart baseline)
 # and save_best instead of save_last for pretrain checkpointing.
 _LEAN_MODELS = {'smart-smile-lean', 'smart-smile-lean-v2', 'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae'}
 # Ablation models also use lean settings
@@ -113,8 +113,8 @@ def main():
                         metavar='SEED')
     parser.add_argument('--pretrain-epochs', type=int, default=25)
     parser.add_argument('--finetune-epochs', type=int, default=35)
-    parser.add_argument('--batch-size', type=int, default=128,
-                        help='Batch size per GPU. Default is 128.')
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='Batch size per GPU. Default is 64.')
     parser.add_argument('--pretrain-only', action='store_true',
                         help='Only run pretraining, skip finetuning')
     parser.add_argument('--finetune-only', action='store_true',
@@ -177,8 +177,8 @@ def main():
         tag_prefix = f'[{idx:>2}/{total}] {model:12s} | {dataset:25s} | seed={seed}'
 
         # ---- Pretrain ----
-        # Lean models: batch_size=128, save_best (same setup as smart baseline)
-        cur_batch_size = 128 if model in _LEAN_MODELS else args.batch_size
+        # Lean models: batch_size=64, save_best (same setup as smart baseline)
+        cur_batch_size = 64 if model in _LEAN_MODELS else args.batch_size
         cur_ft_epochs = 25 if model in _LEAN_MODELS else args.finetune_epochs
         if not args.finetune_only:
             pre_ckpt = pretrain_ckpt(dataset, model, seed)

@@ -58,11 +58,11 @@ def test(args, checkpoint_path, test_dataloader):
             if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
                     or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
                     or args.use_smile_lean_v2):
-                original_mask = batch['mask'].clone()  # no dropout: test uses clean mask
+                policy_mask_clean = batch['mask'].clone()  # no dropout: test uses clean mask
             else:
-                original_mask = None
-            h = encoder(**batch, original_mask=original_mask)
-            preds = classifier(h, original_mask=original_mask, **batch)
+                policy_mask_clean = None
+            h = encoder(**batch, original_mask=policy_mask_clean)
+            preds = classifier(h, original_mask=policy_mask_clean, **batch)
             test_loss += criterion(preds, batch['labels']).item() * batch['x'].shape[0]
             preds_all.append(preds.cpu())
             labels_all.append(batch['labels'].cpu())
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--d_model', type=int, default=32)
     parser.add_argument('--seed', type=int, default=3407)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--save_model', type=bool, default=True)
     parser.add_argument('--save_dir', type=str, default='./export/')
@@ -361,13 +361,13 @@ if __name__ == "__main__":
             for batch in val_dataloader:
                 for key in batch:
                     batch[key] = batch[key].cuda()
-                original_mask = None
+                policy_mask_clean = None
                 if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
                         or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
                         or args.use_smile_lean_v2):
-                    original_mask = batch['mask'].clone()  # no dropout: val uses clean mask
-                h = encoder(**batch, original_mask=original_mask)
-                preds = classifier(h, original_mask=original_mask, **batch)
+                    policy_mask_clean = batch['mask'].clone()  # no dropout: val uses clean mask
+                h = encoder(**batch, original_mask=policy_mask_clean)
+                preds = classifier(h, original_mask=policy_mask_clean, **batch)
                 val_loss += criterion(preds, batch['labels']).item() * batch['x'].shape[0]
                 preds_all.append(preds.cpu())
                 labels_all.append(batch['labels'].cpu())

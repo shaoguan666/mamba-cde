@@ -94,7 +94,7 @@ def main():
                         choices=['c12', 'c19', 'mimic_mortality', 'mimic_phenotyping',
                                  'mimic_decompensation', 'mimic_lengthofstay'])
     parser.add_argument('--seed', type=int, default=3407)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--min_mask_ratio', type=float, default=0.0)
     parser.add_argument('--max_mask_ratio', type=float, default=0.75)
     parser.add_argument('--ratio_temperature', type=float, default=1.0)
