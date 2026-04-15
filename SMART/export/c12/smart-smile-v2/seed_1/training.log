@@ -40,3 +40,10 @@
     "smile_stratified": false,
     "smile_mask_weights": null
 }
+2026-04-15 18:06:46,071 Dataset Loaded.
+2026-04-15 18:06:46,071 system_groups: {'Vital_Invasive': 3, 'Blood_Gas': 4, 'Electrolyte': 5, 'Liver_Enzyme': 6, 'CBC': 3, 'Oxygenation': 3, 'Metabolic': 2}
+2026-04-15 18:07:23,445 Epoch 1: Train Loss 13.4648, Valid Loss 8.7533, EMA Val 8.7533
+2026-04-15 18:09:32,433 Epoch 2: Train Loss 6.4794, Valid Loss 3.6643, EMA Val 7.2266
+2026-04-15 18:14:14,670 Epoch 3: Train Loss 4.1515, Valid Loss 3.0387, EMA Val 5.9702
+2026-04-15 18:18:31,836 Epoch 4: Train Loss 3.4416, Valid Loss 2.5865, EMA Val 4.9551
+2026-04-15 18:22:48,146 Epoch 5: Train Loss 2.9660, Valid Loss 2.3309, EMA Val 4.1679

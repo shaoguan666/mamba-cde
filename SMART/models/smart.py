@@ -1841,23 +1841,11 @@ class DynamicMNARCooccurrenceEncoder(nn.Module):
 
 
 class DynamicMNARBiasVarAttention(nn.Module):
-    """Per-frame variable attention with dynamic MNAR co-occurrence bias.
-
-    Unlike VarAttention (CLS-position query collapsed over time), this computes
-    independent cross-variable attention at every time position, enabling
-    per-frame dynamic MNAR bias injection.
-
-    The MNAR co-occurrence matrix (B, T+1, V, V) is added to attention logits
-    with learnable per-head scaling, optionally modulated by variable-level
-    pairwise time decay.
-
-    Args:
-        dim:       Feature dimension.
-        num_heads: Number of attention heads.
-        qkv_bias:  Whether to use bias in QKV projection.
-        proj_drop: Dropout on output projection.
+    """V2.1 VarAttention: Static Base Features + Dynamic MNAR Graph.
+    
+    Restores the robust temporal-mean Q/K mechanism from V1 to compute a stable 
+    base graph, then expands it to inject the local, frame-by-frame dynamic MNAR bias.
     """
-
     def __init__(self, dim, num_heads=8, qkv_bias=False, proj_drop=0.):
         super().__init__()
         assert dim % num_heads == 0
@@ -1866,40 +1854,68 @@ class DynamicMNARBiasVarAttention(nn.Module):
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        # Per-head MNAR bias scale (zero-init = no bias at init)
         self.mnar_bias_scale = nn.Parameter(torch.zeros(num_heads))
 
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, var_decay=None):
-        B, N, P, C = x.shape  # N=num_vars, P=T+1
+        B, N, P, C = x.shape
 
+        # 1. 提取 QKV
         qkv = self.qkv(x).reshape(B, N, P, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(3, 0, 2, 4, 1, 5)  # (3, B, P, heads, N, head_dim)
-        q, k, v = qkv.unbind(0)               # each: (B, P, heads, N, head_dim)
+        qkv = qkv.permute(3, 0, 2, 4, 1, 5)          # (3, B, P, heads, N, head_dim)
+        q_all, k_all, v_all = qkv.unbind(0)          # each: (B, P, heads, N, head_dim)
 
-        # Per-frame SDPA: reshape to (B*P, heads, N, head_dim)
-        q = q.reshape(B * P, self.num_heads, N, self.head_dim)
-        k = k.reshape(B * P, self.num_heads, N, self.head_dim)
-        v = v.reshape(B * P, self.num_heads, N, self.head_dim)
+        # =========================================================
+        # 2. 恢复 V1 极其强壮的“全局 Q/K 机制” (计算静态基座)
+        # =========================================================
+        # Q: 仅使用 CLS token
+        q = q_all[:, 0]                              # (B, heads, N, head_dim)
+        
+        # K: 使用全序列时间均值
+        mask_r = mask.reshape(B, N, P, 1, 1).repeat(1, 1, 1, self.num_heads, self.head_dim).permute(0, 2, 3, 1, 4)
+        k = k_all.masked_fill(~mask_r.bool(), 0).sum(dim=1) / (mask_r.sum(dim=1) + 1e-6) # (B, heads, N, head_dim)
 
-        # Build per-frame MNAR attention bias
-        attn_mask = None
+        # 计算稳定的基准注意力 Logits
+        # (B, heads, N, head_dim) @ (B, heads, head_dim, N) -> (B, heads, N, N)
+        logits = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+
+        # =========================================================
+        # 3. 展开到时间维度，并注入 V2 局域动态 MNAR
+        # =========================================================
+        # 将静态 Logits 复制 P 份： (B, heads, P, N, N)
+        logits = logits.unsqueeze(2).expand(-1, -1, P, -1, -1).clone()
+
         if mnar_cooccur is not None:
-            # mnar_cooccur: (B, P, N, N) = (B, T+1, V, V)
-            scale = self.mnar_bias_scale.view(1, 1, -1, 1, 1)   # (1, 1, heads, 1, 1)
-            bias = mnar_cooccur.unsqueeze(2) * scale             # (B, P, heads, N, N)
+            # mnar_cooccur: (B, P, N, N)
+            scale = self.mnar_bias_scale.view(1, -1, 1, 1, 1)
+            bias = mnar_cooccur.unsqueeze(1) * scale          # (B, heads, P, N, N)
+            
             if var_decay is not None:
-                # var_decay: (B, heads, N, N) -> broadcast over P
-                bias = bias * var_decay.unsqueeze(1)
-            attn_mask = bias.reshape(B * P, self.num_heads, N, N)
+                # var_decay: (B, heads, N, N) -> (B, heads, 1, N, N)
+                bias = bias * var_decay.unsqueeze(2)
+            
+            # 在稳定基座上打上动态医疗策略的补丁！
+            logits = logits + bias
 
-        x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        # =========================================================
+        # 4. Softmax 并逐帧作用于 Value
+        # =========================================================
+        attn_weights = F.softmax(logits, dim=-1)
+        attn_weights = self.proj_drop(attn_weights)           # (B, heads, P, N, N)
 
-        # Reshape back: (B*P, heads, N, head_dim) -> (B, N, P, C)
-        x = x.reshape(B, P, self.num_heads, N, self.head_dim)
-        x = x.permute(0, 3, 1, 2, 4).reshape(B, N, P, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        return x
+        # 调整 V 的形状以匹配批量矩阵乘法
+        v = v_all.permute(0, 2, 1, 3, 4)                      # (B, heads, P, N, head_dim)
+        
+        # 逐帧进行矩阵相乘：(N, N) @ (N, head_dim) -> (N, head_dim)
+        x_out = torch.matmul(attn_weights, v)                 # (B, heads, P, N, head_dim)
+
+        # =========================================================
+        # 5. 还原形状并输出
+        # =========================================================
+        x_out = x_out.permute(0, 3, 2, 1, 4).reshape(B, N, P, C)
+        
+        x_out = self.proj(x_out)
+        x_out = self.proj_drop(x_out)
+        return x_out
 
 
 class DynamicMNARBiasFiLMVarAttBlock(nn.Module):
