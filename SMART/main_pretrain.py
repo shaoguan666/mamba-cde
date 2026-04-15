@@ -375,11 +375,12 @@ def test(args, checkpoint_path, test_dataloader):
                 batch[key] = batch[key].cuda()
             # Test uses clean mask: no dropout, consistent with finetune test()
             # samepretrain: always None (no MNAR encoder, same as training)
+            policy_mask_clean = None
             if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
-                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
-                original_mask = None if (args.smile_no_mnar or args.use_smile_lean_samepretrain) else batch['mask'].clone()
-            else:
-                original_mask = None
+                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
+                    or args.use_smile_lean_v2):
+                policy_mask_clean = batch['mask'].clone()
+            original_mask = None if (args.smile_no_mnar or args.use_smile_lean_samepretrain) else policy_mask_clean
             with torch.no_grad():
                 h = target_encoder(**batch, original_mask=original_mask)
             batch['labels'] = batch['x']
@@ -435,6 +436,8 @@ if __name__ == "__main__":
                         help='Use SMILELeanEncoder (MNAR cooccur bias + VarAtt FiLM + local obs density)')
     parser.add_argument('--use-smile-lean-samepretrain', action='store_true', default=False,
                         help='Use SMILELeanEncoder with same pretrain as smart (random masking, no MNAR)')
+    parser.add_argument('--use-smile-lean-v2', action='store_true', default=False,
+                        help='Use SMILELeanV2Encoder (dynamic MNAR bias + policy embeddings)')
     parser.add_argument('--use-mnar', action='store_true', default=False,
                         help='Use simplified MNAREncoder (no curriculum masking)')
     parser.add_argument('--save-last', action='store_true', default=False,
@@ -487,6 +490,9 @@ if __name__ == "__main__":
     if args.use_smile_lean_samepretrain:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean-samepretrain'
+    elif args.use_smile_lean_v2:
+        from models.smart import SMILELeanV2Encoder as Encoder
+        model_name = 'smart-smile-lean-v2'
     elif args.use_smile_lean:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean'
@@ -534,7 +540,7 @@ if __name__ == "__main__":
         and not args.smile_no_curriculum
         and not args.smile_stratified
         and (args.use_smile or args.use_smile_film or args.use_smile_lean
-             or args.use_smile_v2 or args.use_smile_v2_film)
+             or args.use_smile_v2 or args.use_smile_v2_film or args.use_smile_lean_v2)
     )
     if _uses_curriculum and not args.save_last:
         args.save_last = True
@@ -689,11 +695,12 @@ if __name__ == "__main__":
         for step, batch in enumerate(batch_bar, 1):
             for key in batch:
                 batch[key] = batch[key].cuda()
-            # Save original clinical observation pattern with progressive MNAR dropout
+            # Clean policy mask is never corrupted; input visibility mask may be.
+            policy_mask_clean = batch['mask'].clone()
             mnar_drop = get_mnar_dropout_rate(i, args.epochs, args.smile_mnar_dropout)
-            original_mask = apply_mnar_dropout(batch['mask'].clone(), dropout_rate=mnar_drop)
+            batch['mask'] = apply_mnar_dropout(batch['mask'], dropout_rate=mnar_drop)
             # When ablating MNAR encoder, pass None so SMILEEncoder skips it
-            enc_original_mask = None if args.smile_no_mnar else original_mask
+            enc_original_mask = None if args.smile_no_mnar else policy_mask_clean
             # smart-smile-lean-samepretrain: same pretrain as smart (random mask, no MNAR)
             if args.use_smile_lean_samepretrain:
                 enc_original_mask = None
@@ -746,11 +753,12 @@ if __name__ == "__main__":
                     batch[key] = batch[key].cuda()
                 # Val uses clean mask: stable metric consistent with finetune val
                 # samepretrain: always None (no MNAR encoder, same as training)
+                policy_mask_clean = None
                 if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
-                        or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
-                    enc_original_mask = None if (args.smile_no_mnar or args.use_smile_lean_samepretrain) else batch['mask'].clone()
-                else:
-                    enc_original_mask = None
+                        or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
+                        or args.use_smile_lean_v2):
+                    policy_mask_clean = batch['mask'].clone()
+                enc_original_mask = None if (args.smile_no_mnar or args.use_smile_lean_samepretrain) else policy_mask_clean
                 h = target_encoder(**batch, original_mask=enc_original_mask)
                 batch['labels'] = batch['x']
                 if var_max_ratios is not None:

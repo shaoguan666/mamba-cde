@@ -1,0 +1,212 @@
+2026-02-24 05:40:59,624 {
+    "dataset": "mimic_phenotyping",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 3407,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_phenotyping/smart-film/seed_3407",
+    "local_rank": 0,
+    "min_mask_ratio": 0.0,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": true
+}
+2026-02-24 16:49:42,704 {
+    "dataset": "mimic_phenotyping",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 3407,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_phenotyping/smart-film/seed_3407",
+    "local_rank": 0,
+    "min_mask_ratio": 0.0,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": true
+}
+2026-02-24 16:49:56,227 Dataset Loaded.
+2026-02-24 16:50:32,605 Epoch 1: Train Loss 0.1108, Valid Loss 0.0365
+2026-02-24 16:50:32,606 ----- Save best model - L1: 0.0365 -----
+2026-02-24 16:51:08,127 Epoch 2: Train Loss 0.0948, Valid Loss 0.0540
+2026-02-24 16:51:43,702 Epoch 3: Train Loss 0.1148, Valid Loss 0.0633
+2026-02-24 16:52:19,340 Epoch 4: Train Loss 0.1257, Valid Loss 0.0660
+2026-02-24 16:52:55,064 Epoch 5: Train Loss 0.1305, Valid Loss 0.0660
+2026-02-24 16:53:31,620 Epoch 6: Train Loss 0.1325, Valid Loss 0.0675
+2026-02-24 16:54:07,353 Epoch 7: Train Loss 0.1354, Valid Loss 0.0679
+2026-02-24 16:54:43,054 Epoch 8: Train Loss 0.1381, Valid Loss 0.0701
+2026-02-24 16:55:18,833 Epoch 9: Train Loss 0.1401, Valid Loss 0.0711
+2026-02-24 16:55:54,513 Epoch 10: Train Loss 0.1443, Valid Loss 0.0717
+2026-02-24 16:56:30,310 Epoch 11: Train Loss 0.1505, Valid Loss 0.0755
+2026-02-24 16:57:07,444 Epoch 12: Train Loss 0.1570, Valid Loss 0.0797
+2026-02-24 16:57:43,278 Epoch 13: Train Loss 0.1650, Valid Loss 0.0860
+2026-02-24 16:58:19,777 Epoch 14: Train Loss 0.1725, Valid Loss 0.0879
+2026-02-24 16:58:55,680 Epoch 15: Train Loss 0.1782, Valid Loss 0.0945
+2026-02-24 16:59:31,585 Epoch 16: Train Loss 0.1848, Valid Loss 0.0945
+2026-02-24 17:00:07,375 Epoch 17: Train Loss 0.1899, Valid Loss 0.0978
+2026-02-24 17:00:42,882 Epoch 18: Train Loss 0.1947, Valid Loss 0.0996
+2026-02-24 17:01:18,557 Epoch 19: Train Loss 0.1989, Valid Loss 0.0997
+2026-02-24 17:01:54,189 Epoch 20: Train Loss 0.2028, Valid Loss 0.1027
+2026-02-24 17:02:29,966 Epoch 21: Train Loss 0.2061, Valid Loss 0.1017
+2026-02-24 17:03:05,640 Epoch 22: Train Loss 0.2068, Valid Loss 0.1019
+2026-02-24 17:03:41,542 Epoch 23: Train Loss 0.2089, Valid Loss 0.1035
+2026-02-24 17:04:17,920 Epoch 24: Train Loss 0.2103, Valid Loss 0.1043
+2026-02-24 17:04:53,523 Epoch 25: Train Loss 0.2095, Valid Loss 0.1016
+2026-02-24 17:04:53,577 last saved model is in epoch 1
+2026-02-24 17:04:56,078 Test Loss 0.0370
+2026-02-24 17:04:59,986 {
+    "dataset": "mimic_phenotyping",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "freeze_epochs": 5,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 3407,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_phenotyping/smart-film/seed_3407",
+    "local_rank": 0,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": true
+}
+2026-02-24 17:05:11,839 Dataset Loaded.
+2026-02-24 17:05:14,220 last saved model is in epoch 1
+2026-02-24 17:05:28,662 auc_micro = 0.7448
+2026-02-24 17:05:28,662 auc_macro = 0.6660
+2026-02-24 17:05:28,663 auc_weighted = 0.6552
+2026-02-24 17:05:28,663 Epoch 1: Train Loss 0.4030, Valid Loss 0.3972
+2026-02-24 17:05:28,664 ----- Save best model - auc_macro: 0.6660 -----
+2026-02-24 17:05:42,906 auc_micro = 0.7589
+2026-02-24 17:05:42,907 auc_macro = 0.6841
+2026-02-24 17:05:42,909 auc_weighted = 0.6712
+2026-02-24 17:05:42,910 Epoch 2: Train Loss 0.3926, Valid Loss 0.3895
+2026-02-24 17:05:42,912 ----- Save best model - auc_macro: 0.6841 -----
+2026-02-24 17:05:57,260 auc_micro = 0.7612
+2026-02-24 17:05:57,270 auc_macro = 0.6910
+2026-02-24 17:05:57,273 auc_weighted = 0.6772
+2026-02-24 17:05:57,275 Epoch 3: Train Loss 0.3900, Valid Loss 0.3882
+2026-02-24 17:05:57,276 ----- Save best model - auc_macro: 0.6910 -----
+2026-02-24 17:06:11,670 auc_micro = 0.7647
+2026-02-24 17:06:11,672 auc_macro = 0.6965
+2026-02-24 17:06:11,673 auc_weighted = 0.6822
+2026-02-24 17:06:11,677 Epoch 4: Train Loss 0.3888, Valid Loss 0.3867
+2026-02-24 17:06:11,678 ----- Save best model - auc_macro: 0.6965 -----
+2026-02-24 17:06:25,969 auc_micro = 0.7653
+2026-02-24 17:06:25,970 auc_macro = 0.6971
+2026-02-24 17:06:25,971 auc_weighted = 0.6830
+2026-02-24 17:06:25,972 Epoch 5: Train Loss 0.3879, Valid Loss 0.3860
+2026-02-24 17:06:25,974 ----- Save best model - auc_macro: 0.6971 -----
+2026-02-24 17:06:50,204 auc_micro = 0.7862
+2026-02-24 17:06:50,204 auc_macro = 0.7268
+2026-02-24 17:06:50,205 auc_weighted = 0.7117
+2026-02-24 17:06:50,205 Epoch 6: Train Loss 0.3780, Valid Loss 0.3746
+2026-02-24 17:06:50,206 ----- Save best model - auc_macro: 0.7268 -----
+2026-02-24 17:07:14,482 auc_micro = 0.7937
+2026-02-24 17:07:14,482 auc_macro = 0.7366
+2026-02-24 17:07:14,483 auc_weighted = 0.7211
+2026-02-24 17:07:14,483 Epoch 7: Train Loss 0.3693, Valid Loss 0.3692
+2026-02-24 17:07:14,484 ----- Save best model - auc_macro: 0.7366 -----
+2026-02-24 17:07:38,803 auc_micro = 0.7997
+2026-02-24 17:07:38,803 auc_macro = 0.7435
+2026-02-24 17:07:38,803 auc_weighted = 0.7282
+2026-02-24 17:07:38,804 Epoch 8: Train Loss 0.3651, Valid Loss 0.3655
+2026-02-24 17:07:38,804 ----- Save best model - auc_macro: 0.7435 -----
+2026-02-24 17:08:03,008 auc_micro = 0.8021
+2026-02-24 17:08:03,009 auc_macro = 0.7471
+2026-02-24 17:08:03,010 auc_weighted = 0.7318
+2026-02-24 17:08:03,011 Epoch 9: Train Loss 0.3623, Valid Loss 0.3637
+2026-02-24 17:08:03,012 ----- Save best model - auc_macro: 0.7471 -----
+2026-02-24 17:08:27,282 auc_micro = 0.8032
+2026-02-24 17:08:27,286 auc_macro = 0.7492
+2026-02-24 17:08:27,291 auc_weighted = 0.7339
+2026-02-24 17:08:27,294 Epoch 10: Train Loss 0.3602, Valid Loss 0.3626
+2026-02-24 17:08:27,299 ----- Save best model - auc_macro: 0.7492 -----
+2026-02-24 17:08:51,344 auc_micro = 0.8030
+2026-02-24 17:08:51,345 auc_macro = 0.7497
+2026-02-24 17:08:51,345 auc_weighted = 0.7344
+2026-02-24 17:08:51,346 Epoch 11: Train Loss 0.3587, Valid Loss 0.3625
+2026-02-24 17:08:51,346 ----- Save best model - auc_macro: 0.7497 -----
+2026-02-24 17:09:15,468 auc_micro = 0.8041
+2026-02-24 17:09:15,469 auc_macro = 0.7519
+2026-02-24 17:09:15,469 auc_weighted = 0.7369
+2026-02-24 17:09:15,470 Epoch 12: Train Loss 0.3573, Valid Loss 0.3624
+2026-02-24 17:09:15,470 ----- Save best model - auc_macro: 0.7519 -----
+2026-02-24 17:09:39,539 auc_micro = 0.8060
+2026-02-24 17:09:39,540 auc_macro = 0.7539
+2026-02-24 17:09:39,540 auc_weighted = 0.7381
+2026-02-24 17:09:39,541 Epoch 13: Train Loss 0.3559, Valid Loss 0.3624
+2026-02-24 17:09:39,541 ----- Save best model - auc_macro: 0.7539 -----
+2026-02-24 17:10:03,770 auc_micro = 0.8066
+2026-02-24 17:10:03,771 auc_macro = 0.7552
+2026-02-24 17:10:03,772 auc_weighted = 0.7395
+2026-02-24 17:10:03,772 Epoch 14: Train Loss 0.3548, Valid Loss 0.3603
+2026-02-24 17:10:03,773 ----- Save best model - auc_macro: 0.7552 -----
+2026-02-24 17:10:27,956 auc_micro = 0.8092
+2026-02-24 17:10:27,957 auc_macro = 0.7566
+2026-02-24 17:10:27,957 auc_weighted = 0.7419
+2026-02-24 17:10:27,958 Epoch 15: Train Loss 0.3540, Valid Loss 0.3588
+2026-02-24 17:10:27,960 ----- Save best model - auc_macro: 0.7566 -----
+2026-02-24 17:10:52,414 auc_micro = 0.8114
+2026-02-24 17:10:52,436 auc_macro = 0.7613
+2026-02-24 17:10:52,437 auc_weighted = 0.7456
+2026-02-24 17:10:52,437 Epoch 16: Train Loss 0.3527, Valid Loss 0.3570
+2026-02-24 17:10:52,438 ----- Save best model - auc_macro: 0.7613 -----
+2026-02-24 17:11:16,941 auc_micro = 0.8097
+2026-02-24 17:11:16,943 auc_macro = 0.7577
+2026-02-24 17:11:16,944 auc_weighted = 0.7426
+2026-02-24 17:11:16,947 Epoch 17: Train Loss 0.3519, Valid Loss 0.3586
+2026-02-24 17:11:41,129 auc_micro = 0.8098
+2026-02-24 17:11:41,130 auc_macro = 0.7583
+2026-02-24 17:11:41,131 auc_weighted = 0.7435
+2026-02-24 17:11:41,132 Epoch 18: Train Loss 0.3513, Valid Loss 0.3580
+2026-02-24 17:12:06,767 auc_micro = 0.8100
+2026-02-24 17:12:06,767 auc_macro = 0.7605
+2026-02-24 17:12:06,768 auc_weighted = 0.7452
+2026-02-24 17:12:06,768 Epoch 19: Train Loss 0.3502, Valid Loss 0.3580
+2026-02-24 17:12:31,079 auc_micro = 0.8115
+2026-02-24 17:12:31,079 auc_macro = 0.7619
+2026-02-24 17:12:31,080 auc_weighted = 0.7463
+2026-02-24 17:12:31,080 Epoch 20: Train Loss 0.3497, Valid Loss 0.3599
+2026-02-24 17:12:31,081 ----- Save best model - auc_macro: 0.7619 -----
+2026-02-24 17:12:55,149 auc_micro = 0.8113
+2026-02-24 17:12:55,150 auc_macro = 0.7618
+2026-02-24 17:12:55,150 auc_weighted = 0.7467
+2026-02-24 17:12:55,151 Epoch 21: Train Loss 0.3488, Valid Loss 0.3588
+2026-02-24 17:13:19,387 auc_micro = 0.8123
+2026-02-24 17:13:19,389 auc_macro = 0.7619
+2026-02-24 17:13:19,390 auc_weighted = 0.7470
+2026-02-24 17:13:19,390 Epoch 22: Train Loss 0.3483, Valid Loss 0.3563
+2026-02-24 17:13:19,391 ----- Save best model - auc_macro: 0.7619 -----
+2026-02-24 17:13:43,549 auc_micro = 0.8138
+2026-02-24 17:13:43,550 auc_macro = 0.7637
+2026-02-24 17:13:43,550 auc_weighted = 0.7489
+2026-02-24 17:13:43,550 Epoch 23: Train Loss 0.3475, Valid Loss 0.3553
+2026-02-24 17:13:43,551 ----- Save best model - auc_macro: 0.7637 -----
+2026-02-24 17:14:07,911 auc_micro = 0.8119
+2026-02-24 17:14:07,912 auc_macro = 0.7612
+2026-02-24 17:14:07,912 auc_weighted = 0.7462
+2026-02-24 17:14:07,913 Epoch 24: Train Loss 0.3468, Valid Loss 0.3567
+2026-02-24 17:14:32,163 auc_micro = 0.8140
+2026-02-24 17:14:32,164 auc_macro = 0.7641
+2026-02-24 17:14:32,164 auc_weighted = 0.7497
+2026-02-24 17:14:32,165 Epoch 25: Train Loss 0.3462, Valid Loss 0.3557
+2026-02-24 17:14:32,166 ----- Save best model - auc_macro: 0.7641 -----
+2026-02-24 17:14:32,204 last saved model is in epoch 25
+2026-02-24 17:14:33,757 auc_micro = 0.8197
+2026-02-24 17:14:33,757 auc_macro = 0.7670
+2026-02-24 17:14:33,757 auc_weighted = 0.7555
+2026-02-24 17:14:33,758 Test Loss 0.3514

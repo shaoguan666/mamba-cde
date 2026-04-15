@@ -1725,3 +1725,440 @@ class SMILELeanEncoder(nn.Module):
             x = block(x, mask_full, lens, lens_mask, mnar_cooccur, time_enc)
 
         return x
+
+
+# ============================================================
+# SMILE-Lean V2: Dynamic MNAR + Variable Policy + Dual-Head
+# ============================================================
+
+
+class PolicyDensityEmbedder(nn.Module):
+    """Embedder with variable-level observation policy tokens.
+
+    Replaces DensityMLPEmbedder. Combines continuous (value, mask, density)
+    projection with learnable policy embeddings that distinguish observed,
+    recently-missing, and long-missing states per variable.
+
+    The recency gate is learned (not a fixed threshold), allowing the model
+    to discover variable-adaptive density-to-recency mappings.
+
+    Input:
+        x             (B, T, V) -- observed values
+        mask          (B, T, V) -- observation mask (possibly with dropout)
+        density       (B, T, V) -- local obs density from avg_pool1d
+        original_mask (B, T, V) or None -- clean mask before dropout
+    Output: (B, V, T, d_model)
+    """
+
+    def __init__(self, d_model):
+        super().__init__()
+        self.embed = nn.Sequential(
+            nn.Linear(3, d_model),
+            nn.Linear(d_model, d_model),
+        )
+        # Learnable policy tokens (small random init)
+        self.embed_observed = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
+        self.embed_recent_missing = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
+        self.embed_long_missing = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
+        # Learned recency gate: density -> soft weight (variable-adaptive)
+        self.recency_gate = nn.Sequential(
+            nn.Linear(1, d_model // 4),
+            nn.GELU(),
+            nn.Linear(d_model // 4, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x, mask, density, original_mask=None):
+        # Continuous feature projection
+        inp = torch.stack((x, mask, density), dim=-1)   # (B, T, V, 3)
+        out = self.embed(inp)                            # (B, T, V, d_model)
+
+        # Determine missing status from clean mask if available
+        if original_mask is not None:
+            is_missing = (original_mask < 0.5).float()   # (B, T, V)
+        else:
+            is_missing = (mask < 0.5).float()
+
+        # Learned recency: density -> [0, 1] interpolation weight
+        recency = self.recency_gate(density.unsqueeze(-1))  # (B, T, V, 1)
+
+        # Policy embedding: observed vs (recent_missing <-> long_missing)
+        is_obs = 1.0 - is_missing                        # (B, T, V)
+        policy_emb = (
+            is_obs.unsqueeze(-1) * self.embed_observed
+            + is_missing.unsqueeze(-1) * (
+                recency * self.embed_recent_missing
+                + (1.0 - recency) * self.embed_long_missing
+            )
+        )                                                 # (B, T, V, d_model)
+
+        return (out + policy_emb).permute(0, 2, 1, 3)    # (B, V, T, d_model)
+
+
+class DynamicMNARCooccurrenceEncoder(nn.Module):
+    """Compute per-frame MNAR co-occurrence using causal sliding windows.
+
+    Replaces global static MNARCooccurrenceEncoder. Produces per-timestep
+    (B, T, V, V) co-occurrence capturing local, time-varying measurement
+    co-missingness patterns via causal windowed computation.
+
+    Uses F.pad + unfold for memory-efficient windowed computation.
+    Output is padded to (B, T+1, V, V) for CLS token alignment.
+
+    Args:
+        window_size: Causal window size for local co-occurrence (default 5).
+    """
+
+    def __init__(self, window_size=5):
+        super().__init__()
+        self.window_size = window_size
+
+    def forward(self, original_mask):
+        # original_mask: (B, T, V), 1=observed, 0=missing
+        B, T, V = original_mask.shape
+        ws = self.window_size
+        missing = 1.0 - original_mask.float()             # (B, T, V)
+
+        # Causal padding: look at current + past ws-1 steps
+        padded = F.pad(missing, (0, 0, ws - 1, 0))       # (B, T+ws-1, V)
+
+        # Extract causal windows via unfold
+        windows = padded.unfold(1, ws, 1)                 # (B, T, V, ws)
+
+        # Batch matmul for co-occurrence per frame
+        w = windows.reshape(B * T, V, ws)                 # (B*T, V, ws)
+        co_occur = torch.bmm(w, w.transpose(1, 2)) / ws  # (B*T, V, V)
+        co_occur = co_occur.reshape(B, T, V, V)
+
+        # Subtract independent expectation (correlation form)
+        marginal = windows.mean(dim=-1)                   # (B, T, V)
+        expected = marginal.unsqueeze(-1) * marginal.unsqueeze(-2)  # (B, T, V, V)
+        co_occur = co_occur - expected
+
+        # Pad for CLS token alignment: (B, T+1, V, V)
+        cls_pad = torch.zeros(B, 1, V, V, device=co_occur.device, dtype=co_occur.dtype)
+        return torch.cat([cls_pad, co_occur], dim=1)
+
+
+class DynamicMNARBiasVarAttention(nn.Module):
+    """Per-frame variable attention with dynamic MNAR co-occurrence bias.
+
+    Unlike VarAttention (CLS-position query collapsed over time), this computes
+    independent cross-variable attention at every time position, enabling
+    per-frame dynamic MNAR bias injection.
+
+    The MNAR co-occurrence matrix (B, T+1, V, V) is added to attention logits
+    with learnable per-head scaling, optionally modulated by variable-level
+    pairwise time decay.
+
+    Args:
+        dim:       Feature dimension.
+        num_heads: Number of attention heads.
+        qkv_bias:  Whether to use bias in QKV projection.
+        proj_drop: Dropout on output projection.
+    """
+
+    def __init__(self, dim, num_heads=8, qkv_bias=False, proj_drop=0.):
+        super().__init__()
+        assert dim % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        # Per-head MNAR bias scale (zero-init = no bias at init)
+        self.mnar_bias_scale = nn.Parameter(torch.zeros(num_heads))
+
+    def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, var_decay=None):
+        B, N, P, C = x.shape  # N=num_vars, P=T+1
+
+        qkv = self.qkv(x).reshape(B, N, P, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(3, 0, 2, 4, 1, 5)  # (3, B, P, heads, N, head_dim)
+        q, k, v = qkv.unbind(0)               # each: (B, P, heads, N, head_dim)
+
+        # Per-frame SDPA: reshape to (B*P, heads, N, head_dim)
+        q = q.reshape(B * P, self.num_heads, N, self.head_dim)
+        k = k.reshape(B * P, self.num_heads, N, self.head_dim)
+        v = v.reshape(B * P, self.num_heads, N, self.head_dim)
+
+        # Build per-frame MNAR attention bias
+        attn_mask = None
+        if mnar_cooccur is not None:
+            # mnar_cooccur: (B, P, N, N) = (B, T+1, V, V)
+            scale = self.mnar_bias_scale.view(1, 1, -1, 1, 1)   # (1, 1, heads, 1, 1)
+            bias = mnar_cooccur.unsqueeze(2) * scale             # (B, P, heads, N, N)
+            if var_decay is not None:
+                # var_decay: (B, heads, N, N) -> broadcast over P
+                bias = bias * var_decay.unsqueeze(1)
+            attn_mask = bias.reshape(B * P, self.num_heads, N, N)
+
+        x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+
+        # Reshape back: (B*P, heads, N, head_dim) -> (B, N, P, C)
+        x = x.reshape(B, P, self.num_heads, N, self.head_dim)
+        x = x.permute(0, 3, 1, 2, 4).reshape(B, N, P, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+
+class DynamicMNARBiasFiLMVarAttBlock(nn.Module):
+    """VarAttBlock with per-frame dynamic MNAR bias, variable-level time decay,
+    and post-attention FiLM modulation.
+
+    Combines:
+    - DynamicMNARBiasVarAttention: per-frame cross-variable attention + MNAR bias
+    - Variable-level time decay: per-variable, per-head temporal modulation
+    - Post-attention FiLM: time-conditional scaling of attention output
+
+    All new parameters zero-initialized for safe integration.
+    """
+
+    def __init__(self, dim, num_heads, time_dim, qkv_bias=False, proj_drop=0.,
+                 norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.num_heads = num_heads
+        self.attn_var = DynamicMNARBiasVarAttention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, proj_drop=proj_drop
+        )
+        # Post-attention FiLM (zero-init = identity)
+        self.film_gen = nn.Linear(time_dim, 2 * dim)
+        nn.init.zeros_(self.film_gen.weight)
+        nn.init.zeros_(self.film_gen.bias)
+        # Variable-level time decay projection (zero-init)
+        self.var_time_proj = nn.Linear(time_dim, num_heads)
+        nn.init.zeros_(self.var_time_proj.weight)
+        nn.init.zeros_(self.var_time_proj.bias)
+
+    def compute_var_time_decay(self, time_enc, mask):
+        """Compute variable-level pairwise time decay for MNAR bias modulation.
+
+        Args:
+            time_enc: (B, T+1, time_dim)
+            mask:     (B, V, T+1) -- observation mask used as weight
+
+        Returns:
+            pair_decay: (B, heads, V, V)
+        """
+        # Exclude CLS token at t=0; only real physical timesteps should shape
+        # variable time statistics.
+        w = mask[:, :, 1:].float()                             # (B, V, T)
+        w_sum = w.sum(dim=-1, keepdim=True).clamp(min=1e-6)    # (B, V, 1)
+        t_enc = time_enc[:, 1:, :]                              # (B, T, time_dim)
+        var_time = torch.bmm(w, t_enc) / w_sum                  # (B, V, time_dim)
+        var_decay = torch.sigmoid(self.var_time_proj(var_time))  # (B, V, num_heads)
+        var_decay = var_decay.permute(0, 2, 1)                  # (B, num_heads, V)
+        pair_decay = (var_decay.unsqueeze(-1) + var_decay.unsqueeze(-2)) / 2
+        return pair_decay                                        # (B, heads, V, V)
+
+    def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, time_enc=None):
+        var_decay = None
+        if time_enc is not None and mnar_cooccur is not None:
+            var_decay = self.compute_var_time_decay(time_enc, mask)
+
+        attn_out = self.attn_var(self.norm1(x), mask, lens, lens_mask,
+                                  mnar_cooccur, var_decay)
+        if time_enc is not None:
+            film = self.film_gen(time_enc)              # (B, T+1, 2*dim)
+            gamma, beta = film.chunk(2, dim=-1)
+            attn_out = (1.0 + gamma.unsqueeze(1)) * attn_out + beta.unsqueeze(1)
+        return x + attn_out
+
+
+class SMILELeanV2BasicBlock(nn.Module):
+    """V2 transformer block: SeqAtt + DynamicMNARBiasFiLMVarAtt + standard MLP.
+
+    Upgrades from SMILELeanBasicBlock:
+    - Per-frame dynamic MNAR bias (replaces static global co-occurrence)
+    - Variable-level time decay (replaces sample-level head gate)
+    - Per-frame cross-variable attention (replaces CLS-only variable attention)
+    """
+
+    def __init__(self, dim, num_heads, time_dim, mlp_ratio=4., qkv_bias=False,
+                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.seq_att_block = SeqAttBlock(
+            dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
+            proj_drop=proj_drop, norm_layer=norm_layer,
+        )
+        self.var_att_block = DynamicMNARBiasFiLMVarAttBlock(
+            dim=dim, num_heads=num_heads, time_dim=time_dim,
+            qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
+        )
+        self.mlp = MLPBlock(
+            dim=dim, mlp_ratio=mlp_ratio,
+            proj_drop=proj_drop, act_layer=act_layer, norm_layer=norm_layer,
+        )
+
+    def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, time_enc=None):
+        lens_mask = lens_mask.repeat_interleave(x.shape[1], dim=0)
+        x = self.seq_att_block(x, mask, lens, lens_mask)
+        x = self.var_att_block(x, mask, lens, lens_mask, mnar_cooccur, time_enc)
+        x = self.mlp(x)
+        return x
+
+
+class SMILELeanV2Encoder(nn.Module):
+    """SMILE-Lean V2 encoder with dynamic MNAR and variable policy embeddings.
+
+    Key changes from SMILELeanEncoder (V1):
+    - PolicyDensityEmbedder: variable-level observation policy tokens replace
+      scalar density, providing signed missingness representation.
+    - DynamicMNARCooccurrenceEncoder: causal windowed (B, T+1, V, V) co-occurrence
+      replaces global static (B, V, V), capturing local temporal dynamics.
+    - DynamicMNARBiasVarAttention: per-frame cross-variable attention with
+      dynamic MNAR bias, replacing CLS-only attention with static bias.
+    - Variable-level time decay: per-variable per-head temporal modulation of
+      MNAR bias, replacing sample-level head gate.
+    - Time-PE removed by default (ablation showed it hurts multi-task).
+      Kept as toggle (v2_use_time_pe) for backward compatibility.
+
+    Compatible with EmbeddingDecoder for pretraining (same output shape).
+    """
+
+    def __init__(self, args):
+        super().__init__()
+        self.time_dim = getattr(args, 'time_dim', 16)
+        self.obs_density_window = getattr(args, 'obs_density_window', 5)
+        self.use_time_pe = getattr(args, 'v2_use_time_pe', False)
+
+        # PolicyDensityEmbedder replaces DensityMLPEmbedder
+        self.embedder = PolicyDensityEmbedder(args.d_model)
+        self.query = nn.Parameter(torch.zeros(args.input_dim, 1, args.d_model))
+        self.query.data.normal_(mean=0.0, std=0.02)
+        self.position_enc = PositionalEncoding(args.d_model, n_position=args.max_len + 1)
+        self.time_encoder = TimeEncoder(self.time_dim)
+
+        # Optional time PE (default off for v2)
+        if self.use_time_pe:
+            self.time_pe_proj = nn.Linear(self.time_dim, args.d_model)
+            nn.init.zeros_(self.time_pe_proj.weight)
+            nn.init.zeros_(self.time_pe_proj.bias)
+
+        # Dynamic MNAR co-occurrence encoder
+        self.mnar_cooccur_encoder = DynamicMNARCooccurrenceEncoder(
+            window_size=self.obs_density_window
+        )
+
+        # V2 transformer blocks
+        self.blocks = nn.ModuleList([
+            SMILELeanV2BasicBlock(
+                dim=args.d_model, num_heads=args.n_heads, time_dim=self.time_dim,
+                mlp_ratio=4., qkv_bias=False, proj_drop=args.dropout,
+            )
+            for _ in range(args.e_layers)
+        ])
+
+    def forward(self, x, lens, mask, time=None, original_mask=None, **kwargs):
+        # Compute local observation density
+        if original_mask is not None:
+            B_m, T_m, V_m = original_mask.shape
+            ws = self.obs_density_window
+            m = original_mask.float().permute(0, 2, 1).reshape(B_m * V_m, 1, T_m)
+            d = F.avg_pool1d(m, kernel_size=ws, stride=1, padding=ws // 2)
+            density = d.reshape(B_m, V_m, T_m).permute(0, 2, 1)  # (B, T, V)
+        else:
+            density = torch.zeros_like(mask)
+
+        # Embed with policy tokens
+        x = self.embedder(x, mask, density, original_mask)    # (B, V, T, d)
+
+        # Dynamic MNAR co-occurrence
+        mnar_cooccur = None
+        if original_mask is not None:
+            mnar_cooccur = self.mnar_cooccur_encoder(original_mask)  # (B, T+1, V, V)
+
+        # CLS token
+        x = torch.cat(
+            (self.query.repeat(x.shape[0], 1, 1, 1), x), dim=2
+        )                                                      # (B, V, T+1, d)
+
+        # Sinusoidal PE (sequence index)
+        x = self.position_enc(x)
+
+        # Mask setup
+        lens_mask = length_to_mask(lens + 1)
+        mask_full = torch.cat(
+            (torch.ones(mask.shape[0], 1, mask.shape[-1],
+                        device=mask.device, dtype=mask.dtype), mask),
+            dim=1,
+        )
+        mask_full = mask_full.transpose(1, 2).float()          # (B, V, T+1)
+
+        # Time encoding
+        time_enc = None
+        if time is not None:
+            cls_time = torch.zeros(x.shape[0], 1, device=time.device, dtype=time.dtype)
+            time_full = torch.cat([cls_time, time], dim=1)     # (B, T+1)
+            time_enc = self.time_encoder(time_full)            # (B, T+1, time_dim)
+            # Optional time PE (default off in v2)
+            if self.use_time_pe:
+                time_pe = self.time_pe_proj(time_enc).unsqueeze(1)  # (B, 1, T+1, d)
+                x = x + time_pe
+
+        # Transformer blocks
+        for block in self.blocks:
+            x = block(x, mask_full, lens, lens_mask, mnar_cooccur, time_enc)
+
+        return x
+
+
+class DualHeadClassifier(nn.Module):
+    """Dual-head classifier: CLS representation + missingness temporal summary.
+
+    Branch 1: Standard CLS token processing (same as Classifier).
+    Branch 2: Temporal missingness summary -- splits original_mask into
+              early/mid/late segments and pools each, providing the classifier
+              with explicit observation-policy information aligned with T3/T4
+              temporal dynamics evidence.
+
+    When original_mask is None, branch 2 receives zeros (graceful fallback).
+
+    Args:
+        args: Namespace with d_model, input_dim, num_class, dropout.
+    """
+
+    def __init__(self, args):
+        super().__init__()
+        d = args.d_model
+        V = args.input_dim
+        # Branch 1: CLS tokens
+        self.cls_mlp = MLPBlock(
+            dim=d, mlp_ratio=4, proj_drop=args.dropout,
+            act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+        )
+        # Branch 2: missingness temporal summary (early/mid/late -> 3*V features)
+        self.mask_proj = nn.Sequential(
+            nn.Linear(V * 3, d),
+            nn.GELU(),
+            nn.Linear(d, d),
+        )
+        # Fusion: CLS (V*d) + mask_summary (d) -> num_class
+        self.out = nn.Linear(d * V + d, args.num_class)
+
+    def forward(self, h, original_mask=None, **kwargs):
+        B, V, T_plus1, H = h.shape
+        # Branch 1: CLS tokens -> MLP -> flatten
+        cls_token = h[:, :, 0]                              # (B, V, H)
+        cls_token = self.cls_mlp(cls_token)                 # (B, V, H)
+        cls_flat = cls_token.reshape(B, -1)                 # (B, V*H)
+
+        # Branch 2: temporal missingness summary (early/mid/late)
+        if original_mask is not None:
+            # original_mask: (B, T, V)
+            T_m = original_mask.shape[1]
+            t1 = T_m // 3
+            t2 = 2 * T_m // 3
+            early = original_mask[:, :t1].float().mean(dim=1)     # (B, V)
+            mid = original_mask[:, t1:t2].float().mean(dim=1)     # (B, V)
+            late = original_mask[:, t2:].float().mean(dim=1)      # (B, V)
+            mask_summary = torch.cat([early, mid, late], dim=-1)  # (B, 3*V)
+        else:
+            mask_summary = torch.zeros(B, V * 3, device=h.device, dtype=h.dtype)
+
+        mask_emb = self.mask_proj(mask_summary)             # (B, H)
+
+        # Fusion
+        fused = torch.cat([cls_flat, mask_emb], dim=-1)     # (B, V*H + H)
+        return self.out(fused)

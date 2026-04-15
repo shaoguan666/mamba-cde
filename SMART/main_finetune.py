@@ -56,12 +56,13 @@ def test(args, checkpoint_path, test_dataloader):
             for key in batch:
                 batch[key] = batch[key].cuda()
             if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
-                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
+                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
+                    or args.use_smile_lean_v2):
                 original_mask = batch['mask'].clone()  # no dropout: test uses clean mask
             else:
                 original_mask = None
             h = encoder(**batch, original_mask=original_mask)
-            preds = classifier(h, **batch)
+            preds = classifier(h, original_mask=original_mask, **batch)
             test_loss += criterion(preds, batch['labels']).item() * batch['x'].shape[0]
             preds_all.append(preds.cpu())
             labels_all.append(batch['labels'].cpu())
@@ -108,6 +109,8 @@ if __name__ == "__main__":
                         help='Use SMILELeanEncoder (MNAR cooccur bias + VarAtt FiLM + local obs density)')
     parser.add_argument('--use-smile-lean-samepretrain', action='store_true', default=False,
                         help='Use SMILELeanEncoder pretrained with same strategy as smart (random masking)')
+    parser.add_argument('--use-smile-lean-v2', action='store_true', default=False,
+                        help='Use SMILELeanV2Encoder (dynamic MNAR bias + policy embeddings + dual head)')
     parser.add_argument('--obs-density-window', type=int, default=5,
                         help='Sliding window size for observation density embedding (must be odd)')
     # SMILE-Lean ablation switches
@@ -145,6 +148,9 @@ if __name__ == "__main__":
     if args.use_smile_lean_samepretrain:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean-samepretrain'
+    elif args.use_smile_lean_v2:
+        from models.smart import SMILELeanV2Encoder as Encoder
+        model_name = 'smart-smile-lean-v2'
     elif args.use_smile_lean:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean'
@@ -258,7 +264,11 @@ if __name__ == "__main__":
     args.inv_order_idx = inv_order_idx.cuda()
 
     encoder = Encoder(args).cuda()
-    classifier = Classifier(args).cuda()
+    if args.use_smile_lean_v2:
+        from models.smart import DualHeadClassifier
+        classifier = DualHeadClassifier(args).cuda()
+    else:
+        classifier = Classifier(args).cuda()
     
     if args.distributed:
         encoder = torch.nn.parallel.DistributedDataParallel(encoder, device_ids=[args.gpu], output_device=args.local_rank, find_unused_parameters=True)
@@ -324,17 +334,18 @@ if __name__ == "__main__":
         for step, batch in enumerate(batch_bar, 1):
             for key in batch:
                 batch[key] = batch[key].cuda()
+            policy_mask_clean = None
             if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
-                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
-                original_mask = apply_mnar_dropout(batch['mask'].clone(), current_mnar_drop)
-            else:
-                original_mask = None
+                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
+                    or args.use_smile_lean_v2):
+                policy_mask_clean = batch['mask'].clone()
+                batch['mask'] = apply_mnar_dropout(batch['mask'], current_mnar_drop)
             if i <= args.freeze_epochs:
                 with torch.no_grad():
-                    h = encoder(**batch, original_mask=original_mask)
+                    h = encoder(**batch, original_mask=policy_mask_clean)
             else:
-                h = encoder(**batch, original_mask=original_mask)
-            preds = classifier(h, **batch)
+                h = encoder(**batch, original_mask=policy_mask_clean)
+            preds = classifier(h, original_mask=policy_mask_clean, **batch)
             loss = criterion(preds, batch['labels'])
             optimizer.zero_grad()
             loss.backward()
@@ -350,13 +361,13 @@ if __name__ == "__main__":
             for batch in val_dataloader:
                 for key in batch:
                     batch[key] = batch[key].cuda()
+                original_mask = None
                 if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
-                        or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain):
+                        or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
+                        or args.use_smile_lean_v2):
                     original_mask = batch['mask'].clone()  # no dropout: val uses clean mask
-                else:
-                    original_mask = None
                 h = encoder(**batch, original_mask=original_mask)
-                preds = classifier(h, **batch)
+                preds = classifier(h, original_mask=original_mask, **batch)
                 val_loss += criterion(preds, batch['labels']).item() * batch['x'].shape[0]
                 preds_all.append(preds.cpu())
                 labels_all.append(batch['labels'].cpu())
