@@ -453,9 +453,9 @@ if __name__ == "__main__":
                         help='MNAR dropout rate (default 0.05)')
     parser.add_argument('--obs-density-window', type=int, default=5,
                         help='Sliding window size for observation density embedding (must be odd)')
-    # SMILE-Lean ablation switches
+    # SMILE-v2 / SMILE-Lean ablation switches
     parser.add_argument('--abl-no-density', action='store_true', default=False,
-                        help='Ablation: use MLPEmbedder instead of DensityMLPEmbedder')
+                        help='Ablation: disable observation-density pathway')
     parser.add_argument('--abl-no-mnar-bias', action='store_true', default=False,
                         help='Ablation: disable MNAR co-occurrence attention bias')
     parser.add_argument('--abl-no-film', action='store_true', default=False,
@@ -464,6 +464,16 @@ if __name__ == "__main__":
                         help='Ablation: disable time-dynamic MNAR scaling only')
     parser.add_argument('--abl-no-time-pe', action='store_true', default=False,
                         help='Ablation: disable physical-time positional encoding')
+    parser.add_argument('--abl-no-cross-attn', action='store_true', default=False,
+                        help='Ablation: disable per-block MNAR cross-attention fusion')
+    parser.add_argument('--abl-no-mnar-cls', action='store_true', default=False,
+                        help='Ablation: disable global MNAR -> CLS injection')
+    parser.add_argument('--abl-no-policy', action='store_true', default=False,
+                        help='Ablation: disable policy tokens in SMILE-Lean v2 embedder')
+    parser.add_argument('--abl-no-dynamic-mnar', action='store_true', default=False,
+                        help='Ablation: replace dynamic MNAR co-occurrence with static global co-occurrence')
+    parser.add_argument('--abl-no-dual-head', action='store_true', default=False,
+                        help='Ablation: finetune with standard classifier instead of dual-head classifier')
     parser.add_argument('--pretrain-mask-mode', type=str, default='fixed',
                         choices=['fixed', 'proportional_var'],
                         help='fixed=uniform ratio across variables (default); '
@@ -478,13 +488,18 @@ if __name__ == "__main__":
                         help='Custom fixed masking mix (system temporal random), must sum to 1. '
                              'Overrides dataset-adaptive defaults when --smile-stratified is set.')
     args = parser.parse_args()
-    # Build ablation suffix for smile-lean variants
+    # Build ablation suffix for architecture variants
     _abl_flags = {
         'no-density': args.abl_no_density,
         'no-mnar-bias': args.abl_no_mnar_bias,
         'no-film': args.abl_no_film,
         'no-time-mnar': args.abl_no_time_mnar,
         'no-time-pe': args.abl_no_time_pe,
+        'no-cross-attn': args.abl_no_cross_attn,
+        'no-mnar-cls': args.abl_no_mnar_cls,
+        'no-policy': args.abl_no_policy,
+        'no-dynamic-mnar': args.abl_no_dynamic_mnar,
+        'no-dual-head': args.abl_no_dual_head,
     }
     _abl_suffix = '-'.join(k for k, v in _abl_flags.items() if v)
     if args.use_smile_lean_samepretrain:
@@ -493,6 +508,8 @@ if __name__ == "__main__":
     elif args.use_smile_lean_v2:
         from models.smart import SMILELeanV2Encoder as Encoder
         model_name = 'smart-smile-lean-v2'
+        if _abl_suffix:
+            model_name = 'smart-smile-lean-v2-' + _abl_suffix
     elif args.use_smile_lean:
         from models.smart import SMILELeanEncoder as Encoder
         model_name = 'smart-smile-lean'
@@ -501,9 +518,13 @@ if __name__ == "__main__":
     elif args.use_smile_v2_film:
         from models.smart import SMILEv2FiLMEncoder as Encoder
         model_name = 'smart-smile-v2-film'
+        if _abl_suffix:
+            model_name = 'smart-smile-v2-film-' + _abl_suffix
     elif args.use_smile_v2:
         from models.smart import SMILEv2Encoder as Encoder
         model_name = 'smart-smile-v2'
+        if _abl_suffix:
+            model_name = 'smart-smile-v2-' + _abl_suffix
     elif args.use_mnar:
         from models.smart import MNAREncoder as Encoder
         model_name = 'smart-mnar'

@@ -41,30 +41,66 @@ ALL_MODELS = ['smart', 'smart-film', 'smart-smile', 'smart-smile-film', 'smart-m
               'smart-smile-v2', 'smart-smile-v2-film', 'smart-smile-lean',
               'smart-smile-lean-v2', 'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae',
               'smart-smile-stratified']
-# SMILE-Lean ablation variants (architecture ablation)
+# SMILE-v2 / SMILE-Lean ablation variants (architecture ablation)
 ABLATION_MODELS = [
+    'smart-smile-v2-no-density',
+    'smart-smile-v2-no-mnar-bias',
+    'smart-smile-v2-no-cross-attn',
+    'smart-smile-v2-no-mnar-cls',
+    'smart-smile-v2-film-no-density',
+    'smart-smile-v2-film-no-mnar-bias',
+    'smart-smile-v2-film-no-cross-attn',
+    'smart-smile-v2-film-no-mnar-cls',
     'smart-smile-lean-no-density',
     'smart-smile-lean-no-mnar-bias',
     'smart-smile-lean-no-film',
     'smart-smile-lean-no-time-mnar',
     'smart-smile-lean-no-time-pe',
     'smart-smile-lean-no-mnar-bias-no-time-mnar',  # remove all MNAR signals
+    'smart-smile-lean-v2-no-density',
+    'smart-smile-lean-v2-no-policy',
+    'smart-smile-lean-v2-no-mnar-bias',
+    'smart-smile-lean-v2-no-dynamic-mnar',
+    'smart-smile-lean-v2-no-time-mnar',
+    'smart-smile-lean-v2-no-film',
+    'smart-smile-lean-v2-no-dual-head',
 ]
 ALL_SEEDS = [1, 42, 3407, 1234, 2024, 9999]
 # Lean models use batch_size=64 and finetune_epochs=25 (same as smart baseline)
 # and save_best instead of save_last for pretrain checkpointing.
 _LEAN_MODELS = {'smart-smile-lean', 'smart-smile-lean-v2', 'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae'}
 # Ablation models also use lean settings
-_LEAN_MODELS.update(ABLATION_MODELS)
+_LEAN_V1_ABLATION_MODELS = {
+    m for m in ABLATION_MODELS
+    if m.startswith('smart-smile-lean-') and not m.startswith('smart-smile-lean-v2-')
+}
+_LEAN_V2_ABLATION_MODELS = {m for m in ABLATION_MODELS if m.startswith('smart-smile-lean-v2-')}
+_LEAN_ABLATION_MODELS = _LEAN_V1_ABLATION_MODELS | _LEAN_V2_ABLATION_MODELS
+_LEAN_MODELS.update(_LEAN_ABLATION_MODELS)
 
 # Map ablation model name -> list of --abl-* CLI flags
 _ABLATION_FLAGS = {
+    'smart-smile-v2-no-density':                     ['--abl-no-density'],
+    'smart-smile-v2-no-mnar-bias':                  ['--abl-no-mnar-bias'],
+    'smart-smile-v2-no-cross-attn':                 ['--abl-no-cross-attn'],
+    'smart-smile-v2-no-mnar-cls':                   ['--abl-no-mnar-cls'],
+    'smart-smile-v2-film-no-density':               ['--abl-no-density'],
+    'smart-smile-v2-film-no-mnar-bias':             ['--abl-no-mnar-bias'],
+    'smart-smile-v2-film-no-cross-attn':            ['--abl-no-cross-attn'],
+    'smart-smile-v2-film-no-mnar-cls':              ['--abl-no-mnar-cls'],
     'smart-smile-lean-no-density':                   ['--abl-no-density'],
     'smart-smile-lean-no-mnar-bias':                 ['--abl-no-mnar-bias'],
     'smart-smile-lean-no-film':                      ['--abl-no-film'],
     'smart-smile-lean-no-time-mnar':                 ['--abl-no-time-mnar'],
     'smart-smile-lean-no-time-pe':                   ['--abl-no-time-pe'],
     'smart-smile-lean-no-mnar-bias-no-time-mnar':    ['--abl-no-mnar-bias', '--abl-no-time-mnar'],
+    'smart-smile-lean-v2-no-density':                ['--abl-no-density'],
+    'smart-smile-lean-v2-no-policy':                 ['--abl-no-policy'],
+    'smart-smile-lean-v2-no-mnar-bias':              ['--abl-no-mnar-bias'],
+    'smart-smile-lean-v2-no-dynamic-mnar':           ['--abl-no-dynamic-mnar'],
+    'smart-smile-lean-v2-no-time-mnar':              ['--abl-no-time-mnar'],
+    'smart-smile-lean-v2-no-film':                   ['--abl-no-film'],
+    'smart-smile-lean-v2-no-dual-head':              ['--abl-no-dual-head'],
 }
 
 
@@ -145,11 +181,14 @@ def main():
     for idx, (model, dataset, seed) in enumerate(plan, 1):
         use_film_flag          = ['--use-film']          if model == 'smart-film'          else []
         use_smile_film_flag    = ['--use-smile-film']    if model == 'smart-smile-film'    else []
-        use_smile_v2_film_flag = ['--use-smile-v2-film'] if model == 'smart-smile-v2-film' else []
-        use_smile_v2_flag      = ['--use-smile-v2']      if model == 'smart-smile-v2'      else []
-        use_smile_lean_v2_flag = ['--use-smile-lean-v2'] if model == 'smart-smile-lean-v2' else []
-        _is_lean_ablation = model in _ABLATION_FLAGS
-        use_smile_lean_flag              = ['--use-smile-lean']             if model in ('smart-smile-lean', 'smart-smile-lean-pmae') or _is_lean_ablation else []
+        _is_v2_film_ablation = model.startswith('smart-smile-v2-film-') and model in _ABLATION_FLAGS
+        _is_v2_ablation = model.startswith('smart-smile-v2-') and not _is_v2_film_ablation and model in _ABLATION_FLAGS
+        use_smile_v2_film_flag = ['--use-smile-v2-film'] if model == 'smart-smile-v2-film' or _is_v2_film_ablation else []
+        use_smile_v2_flag      = ['--use-smile-v2']      if model == 'smart-smile-v2' or _is_v2_ablation else []
+        _is_lean_v2_ablation = model in _LEAN_V2_ABLATION_MODELS
+        use_smile_lean_v2_flag = ['--use-smile-lean-v2'] if model == 'smart-smile-lean-v2' or _is_lean_v2_ablation else []
+        _is_lean_v1_ablation = model in _LEAN_V1_ABLATION_MODELS
+        use_smile_lean_flag              = ['--use-smile-lean']             if model in ('smart-smile-lean', 'smart-smile-lean-pmae') or _is_lean_v1_ablation else []
         use_smile_lean_samepretrain_flag = ['--use-smile-lean-samepretrain'] if model == 'smart-smile-lean-samepretrain' else []
         pmae_pretrain_flag               = ['--pretrain-mask-mode', 'proportional_var'] if model == 'smart-smile-lean-pmae' else []
         pmae_pretrain_dir_flag           = ['--pretrain-dir', os.path.join('./export', dataset, model, f'seed_{seed}')] if model == 'smart-smile-lean-pmae' else []
@@ -172,8 +211,8 @@ def main():
             smile_extra = ['--smile-mask-type', 'system']
         elif model == 'smart-smile-stratified':
             smile_extra = ['--smile-stratified']
-        # SMILE-Lean architecture ablation flags
-        lean_abl_extra = _ABLATION_FLAGS.get(model, [])
+        # Architecture ablation flags
+        arch_abl_extra = _ABLATION_FLAGS.get(model, [])
         tag_prefix = f'[{idx:>2}/{total}] {model:12s} | {dataset:25s} | seed={seed}'
 
         # ---- Pretrain ----
@@ -197,7 +236,7 @@ def main():
                     '--seed', str(seed),
                     '--epochs', str(args.pretrain_epochs),
                     '--batch_size', str(cur_batch_size),
-                ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_flag + lean_abl_extra
+                ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_flag + arch_abl_extra
                 ok = run_cmd(cmd, f'{tag_prefix} | PRETRAIN', args.dry_run)
                 if not ok:
                     failed.append(f'{tag_prefix} pretrain')
@@ -222,7 +261,7 @@ def main():
                 '--seed', str(seed),
                 '--epochs', str(cur_ft_epochs),
                 '--batch_size', str(cur_batch_size),
-            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_dir_flag + lean_abl_extra
+            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_dir_flag + arch_abl_extra
             ok = run_cmd(cmd, f'{tag_prefix} | FINETUNE', args.dry_run)
             if not ok:
                 failed.append(f'{tag_prefix} finetune')

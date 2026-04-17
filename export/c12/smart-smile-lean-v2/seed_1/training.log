@@ -1,0 +1,74 @@
+2026-04-15 23:34:27,943 {
+    "dataset": "c12",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 1,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/c12/smart-smile-lean-v2/seed_1",
+    "local_rank": 0,
+    "min_mask_ratio": 0.15,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false,
+    "use_smile": false,
+    "use_smile_film": false,
+    "use_smile_v2": false,
+    "use_smile_v2_film": false,
+    "use_smile_lean": false,
+    "use_smile_lean_samepretrain": false,
+    "use_smile_lean_v2": true,
+    "use_mnar": false,
+    "save_last": true,
+    "smile_no_mnar": false,
+    "smile_no_curriculum": false,
+    "smile_mask_type": "all",
+    "smile_mnar_dropout": 0.05,
+    "obs_density_window": 5,
+    "abl_no_density": false,
+    "abl_no_mnar_bias": false,
+    "abl_no_film": false,
+    "abl_no_time_mnar": false,
+    "abl_no_time_pe": false,
+    "abl_no_cross_attn": false,
+    "abl_no_mnar_cls": false,
+    "pretrain_mask_mode": "fixed",
+    "ratio_temperature": 1.0,
+    "smile_stratified": false,
+    "smile_mask_weights": null
+}
+2026-04-15 23:34:29,651 Dataset Loaded.
+2026-04-15 23:34:29,652 system_groups: {'Vital_Invasive': 3, 'Blood_Gas': 4, 'Electrolyte': 5, 'Liver_Enzyme': 6, 'CBC': 3, 'Oxygenation': 3, 'Metabolic': 2}
+2026-04-15 23:34:49,398 Epoch 1: Train Loss 4.0906, Valid Loss 1.5126, EMA Val 1.5126
+2026-04-15 23:35:06,387 Epoch 2: Train Loss 1.5394, Valid Loss 1.0369, EMA Val 1.3699
+2026-04-15 23:35:23,560 Epoch 3: Train Loss 1.1424, Valid Loss 0.8664, EMA Val 1.2188
+2026-04-15 23:35:39,880 Epoch 4: Train Loss 0.9921, Valid Loss 0.7491, EMA Val 1.0779
+2026-04-15 23:35:56,004 Epoch 5: Train Loss 0.9124, Valid Loss 0.7142, EMA Val 0.9688
+2026-04-15 23:36:13,085 Epoch 6: Train Loss 0.8712, Valid Loss 0.6937, EMA Val 0.8863
+2026-04-15 23:36:33,072 Epoch 7: Train Loss 0.8417, Valid Loss 0.6831, EMA Val 0.8253
+2026-04-15 23:36:53,072 Epoch 8: Train Loss 0.7974, Valid Loss 0.6522, EMA Val 0.7734
+2026-04-15 23:37:13,060 Epoch 9: Train Loss 0.7919, Valid Loss 0.6400, EMA Val 0.7334
+2026-04-15 23:37:32,857 Epoch 10: Train Loss 0.7574, Valid Loss 0.6309, EMA Val 0.7026
+2026-04-15 23:37:52,644 Epoch 11: Train Loss 0.7582, Valid Loss 0.6137, EMA Val 0.6760
+2026-04-15 23:38:12,552 Epoch 12: Train Loss 0.7433, Valid Loss 0.6312, EMA Val 0.6625
+2026-04-15 23:38:32,425 Epoch 13: Train Loss 0.7392, Valid Loss 0.6382, EMA Val 0.6552
+2026-04-15 23:38:52,335 Epoch 14: Train Loss 0.7663, Valid Loss 0.6161, EMA Val 0.6435
+2026-04-15 23:39:12,059 Epoch 15: Train Loss 0.7831, Valid Loss 0.6294, EMA Val 0.6393
+2026-04-15 23:39:32,047 Epoch 16: Train Loss 0.7668, Valid Loss 0.6903, EMA Val 0.6546
+2026-04-15 23:39:52,281 Epoch 17: Train Loss 0.7561, Valid Loss 0.6616, EMA Val 0.6567
+2026-04-15 23:40:12,894 Epoch 18: Train Loss 0.7918, Valid Loss 0.6676, EMA Val 0.6599
+2026-04-15 23:40:32,890 Epoch 19: Train Loss 0.8088, Valid Loss 0.6840, EMA Val 0.6672
+2026-04-15 23:40:52,821 Epoch 20: Train Loss 0.7946, Valid Loss 0.7042, EMA Val 0.6783
+2026-04-15 23:41:12,833 Epoch 21: Train Loss 0.8051, Valid Loss 0.7101, EMA Val 0.6878
+2026-04-15 23:41:32,810 Epoch 22: Train Loss 0.7608, Valid Loss 0.7248, EMA Val 0.6989
+2026-04-15 23:41:49,250 Epoch 23: Train Loss 0.7740, Valid Loss 0.7257, EMA Val 0.7069
+2026-04-15 23:42:05,226 Epoch 24: Train Loss 0.7655, Valid Loss 0.7372, EMA Val 0.7160
+2026-04-15 23:42:20,704 Epoch 25: Train Loss 0.7734, Valid Loss 0.7847, EMA Val 0.7366
+2026-04-15 23:42:20,705 ----- Save last epoch model - L1: 0.7366 -----
+2026-04-15 23:42:20,760 last saved model is in epoch 25
+2026-04-15 23:42:22,265 Test Loss 0.8535

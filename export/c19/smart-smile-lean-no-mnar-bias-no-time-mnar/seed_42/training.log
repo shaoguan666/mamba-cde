@@ -1,0 +1,304 @@
+2026-03-26 16:39:36,519 {
+    "dataset": "c19",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 42,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/c19\\smart-smile-lean-no-mnar-bias-no-time-mnar\\seed_42",
+    "local_rank": 0,
+    "min_mask_ratio": 0.15,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false,
+    "use_smile": false,
+    "use_smile_film": false,
+    "use_smile_v2": false,
+    "use_smile_v2_film": false,
+    "use_smile_lean": true,
+    "use_smile_lean_samepretrain": false,
+    "use_mnar": false,
+    "save_last": true,
+    "smile_no_mnar": false,
+    "smile_no_curriculum": false,
+    "smile_mask_type": "all",
+    "smile_mnar_dropout": 0.05,
+    "obs_density_window": 5,
+    "abl_no_density": false,
+    "abl_no_mnar_bias": true,
+    "abl_no_film": false,
+    "abl_no_time_mnar": true,
+    "abl_no_time_pe": false,
+    "pretrain_mask_mode": "fixed",
+    "ratio_temperature": 1.0,
+    "smile_stratified": false,
+    "smile_mask_weights": null
+}
+2026-03-26 16:39:39,494 Dataset Loaded.
+2026-03-26 16:39:39,494 system_groups: {'Vital_Basic': 7, 'Resp_Gas': 7, 'Liver_Enzyme': 2, 'Renal': 3, 'Coagulation': 3, 'CBC': 3, 'Bilirubin': 2}
+2026-03-26 16:40:53,584 Epoch 1: Train Loss 0.0822, Valid Loss 0.0239, EMA Val 0.0239
+2026-03-26 16:42:04,628 Epoch 2: Train Loss 0.0603, Valid Loss 0.0233, EMA Val 0.0237
+2026-03-26 16:43:16,143 Epoch 3: Train Loss 0.0500, Valid Loss 0.0207, EMA Val 0.0228
+2026-03-26 16:44:28,034 Epoch 4: Train Loss 0.0439, Valid Loss 0.0203, EMA Val 0.0221
+2026-03-26 16:45:39,936 Epoch 5: Train Loss 0.0418, Valid Loss 0.0201, EMA Val 0.0215
+2026-03-26 16:46:50,578 Epoch 6: Train Loss 0.0419, Valid Loss 0.0214, EMA Val 0.0214
+2026-03-26 16:48:00,373 Epoch 7: Train Loss 0.0437, Valid Loss 0.0234, EMA Val 0.0220
+2026-03-26 16:49:10,431 Epoch 8: Train Loss 0.0460, Valid Loss 0.0235, EMA Val 0.0225
+2026-03-26 16:50:20,672 Epoch 9: Train Loss 0.0481, Valid Loss 0.0240, EMA Val 0.0229
+2026-03-26 16:51:30,945 Epoch 10: Train Loss 0.0511, Valid Loss 0.0271, EMA Val 0.0242
+2026-03-26 16:52:40,951 Epoch 11: Train Loss 0.0535, Valid Loss 0.0273, EMA Val 0.0251
+2026-03-26 16:53:51,102 Epoch 12: Train Loss 0.0584, Valid Loss 0.0291, EMA Val 0.0263
+2026-03-26 16:55:02,147 Epoch 13: Train Loss 0.0601, Valid Loss 0.0297, EMA Val 0.0273
+2026-03-26 16:56:12,732 Epoch 14: Train Loss 0.0650, Valid Loss 0.0338, EMA Val 0.0293
+2026-03-26 16:57:23,540 Epoch 15: Train Loss 0.0675, Valid Loss 0.0332, EMA Val 0.0304
+2026-03-26 16:58:34,304 Epoch 16: Train Loss 0.0723, Valid Loss 0.0404, EMA Val 0.0334
+2026-03-26 16:59:49,454 Epoch 17: Train Loss 0.0757, Valid Loss 0.0377, EMA Val 0.0347
+2026-03-26 17:01:01,513 Epoch 18: Train Loss 0.0800, Valid Loss 0.0406, EMA Val 0.0365
+2026-03-26 17:02:14,190 Epoch 19: Train Loss 0.0845, Valid Loss 0.0415, EMA Val 0.0380
+2026-03-26 17:03:33,270 Epoch 20: Train Loss 0.0890, Valid Loss 0.0424, EMA Val 0.0393
+2026-03-26 17:04:52,529 Epoch 21: Train Loss 0.0923, Valid Loss 0.0429, EMA Val 0.0404
+2026-03-26 17:06:11,549 Epoch 22: Train Loss 0.0954, Valid Loss 0.0448, EMA Val 0.0417
+2026-03-26 17:07:30,356 Epoch 23: Train Loss 0.0981, Valid Loss 0.0452, EMA Val 0.0428
+2026-03-26 17:08:47,831 Epoch 24: Train Loss 0.1008, Valid Loss 0.0472, EMA Val 0.0441
+2026-03-26 17:10:06,476 Epoch 25: Train Loss 0.1048, Valid Loss 0.0502, EMA Val 0.0459
+2026-03-26 17:10:06,477 ----- Save last epoch model - L1: 0.0459 -----
+2026-03-26 17:10:06,514 last saved model is in epoch 25
+2026-03-26 17:10:12,508 Test Loss 0.0504
+2026-03-26 17:10:20,586 {
+    "dataset": "c19",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "freeze_epochs": 5,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 42,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/c19\\smart-smile-lean-no-mnar-bias-no-time-mnar\\seed_42",
+    "pretrain_dir": null,
+    "local_rank": 0,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false,
+    "use_smile": false,
+    "use_smile_film": false,
+    "use_mnar": false,
+    "use_smile_v2": false,
+    "use_smile_v2_film": false,
+    "use_smile_lean": true,
+    "use_smile_lean_samepretrain": false,
+    "obs_density_window": 5,
+    "abl_no_density": false,
+    "abl_no_mnar_bias": true,
+    "abl_no_film": false,
+    "abl_no_time_mnar": true,
+    "abl_no_time_pe": false,
+    "smile_no_mnar": false,
+    "smile_no_curriculum": false,
+    "smile_mask_type": "all",
+    "smile_mnar_dropout": 0.05,
+    "smile_mnar_dropout_initial": 0.0,
+    "smile_stratified": false
+}
+2026-03-26 17:10:26,311 Dataset Loaded.
+2026-03-26 17:10:27,999 Class weights: [0.5393641591072083, 6.850955486297607]
+2026-03-26 17:10:28,017 last saved model is in epoch 25
+2026-03-26 17:11:03,863 [[2689 1049]
+ [  50  245]]
+2026-03-26 17:11:03,867 AUC of ROC = 0.8453
+2026-03-26 17:11:03,867 AUC of PRC = 0.3166
+2026-03-26 17:11:03,868 min(+P, Se) = 0.4000
+2026-03-26 17:11:03,868 f1_score = 0.4007 (threshold = 1.0946)
+2026-03-26 17:11:03,868 Epoch 1: Train Loss 0.5556, Valid Loss 0.4895
+2026-03-26 17:11:03,869 ----- Save best model - auprc: 0.3166 -----
+2026-03-26 17:11:38,044 [[2999  739]
+ [  73  222]]
+2026-03-26 17:11:38,049 AUC of ROC = 0.8544
+2026-03-26 17:11:38,049 AUC of PRC = 0.3276
+2026-03-26 17:11:38,049 min(+P, Se) = 0.3932
+2026-03-26 17:11:38,050 f1_score = 0.4078 (threshold = 0.7849)
+2026-03-26 17:11:38,051 Epoch 2: Train Loss 0.5128, Valid Loss 0.4666
+2026-03-26 17:11:38,055 ----- Save best model - auprc: 0.3276 -----
+2026-03-26 17:12:12,413 [[3305  433]
+ [ 109  186]]
+2026-03-26 17:12:12,418 AUC of ROC = 0.8652
+2026-03-26 17:12:12,418 AUC of PRC = 0.3720
+2026-03-26 17:12:12,418 min(+P, Se) = 0.4305
+2026-03-26 17:12:12,419 f1_score = 0.4441 (threshold = 0.5376)
+2026-03-26 17:12:12,419 Epoch 3: Train Loss 0.5046, Valid Loss 0.4791
+2026-03-26 17:12:12,420 ----- Save best model - auprc: 0.3720 -----
+2026-03-26 17:12:46,715 [[2871  867]
+ [  53  242]]
+2026-03-26 17:12:46,719 AUC of ROC = 0.8621
+2026-03-26 17:12:46,720 AUC of PRC = 0.3520
+2026-03-26 17:12:46,720 min(+P, Se) = 0.4237
+2026-03-26 17:12:46,720 f1_score = 0.4273 (threshold = 0.7981)
+2026-03-26 17:12:46,721 Epoch 4: Train Loss 0.4973, Valid Loss 0.4551
+2026-03-26 17:13:21,666 [[3205  533]
+ [  82  213]]
+2026-03-26 17:13:21,671 AUC of ROC = 0.8762
+2026-03-26 17:13:21,671 AUC of PRC = 0.3477
+2026-03-26 17:13:21,671 min(+P, Se) = 0.3974
+2026-03-26 17:13:21,672 f1_score = 0.4199 (threshold = 0.2066)
+2026-03-26 17:13:21,672 Epoch 5: Train Loss 0.4835, Valid Loss 0.4462
+2026-03-26 17:14:19,020 [[3213  525]
+ [  24  271]]
+2026-03-26 17:14:19,025 AUC of ROC = 0.9501
+2026-03-26 17:14:19,026 AUC of PRC = 0.6978
+2026-03-26 17:14:19,026 min(+P, Se) = 0.6475
+2026-03-26 17:14:19,026 f1_score = 0.6481 (threshold = 1.0293)
+2026-03-26 17:14:19,028 Epoch 6: Train Loss 0.3968, Valid Loss 0.2967
+2026-03-26 17:14:19,028 ----- Save best model - auprc: 0.6978 -----
+2026-03-26 17:15:12,847 [[3416  322]
+ [  46  249]]
+2026-03-26 17:15:12,849 AUC of ROC = 0.9547
+2026-03-26 17:15:12,850 AUC of PRC = 0.7546
+2026-03-26 17:15:12,850 min(+P, Se) = 0.7239
+2026-03-26 17:15:12,850 f1_score = 0.7264 (threshold = 1.0055)
+2026-03-26 17:15:12,850 Epoch 7: Train Loss 0.3248, Valid Loss 0.2684
+2026-03-26 17:15:12,850 ----- Save best model - auprc: 0.7546 -----
+2026-03-26 17:16:00,241 [[3398  340]
+ [  37  258]]
+2026-03-26 17:16:00,244 AUC of ROC = 0.9621
+2026-03-26 17:16:00,244 AUC of PRC = 0.7487
+2026-03-26 17:16:00,244 min(+P, Se) = 0.7220
+2026-03-26 17:16:00,244 f1_score = 0.7238 (threshold = 1.2281)
+2026-03-26 17:16:00,244 Epoch 8: Train Loss 0.3017, Valid Loss 0.2493
+2026-03-26 17:16:48,682 [[3457  281]
+ [  33  262]]
+2026-03-26 17:16:48,684 AUC of ROC = 0.9648
+2026-03-26 17:16:48,684 AUC of PRC = 0.7811
+2026-03-26 17:16:48,684 min(+P, Se) = 0.7365
+2026-03-26 17:16:48,685 f1_score = 0.7423 (threshold = 1.1044)
+2026-03-26 17:16:48,685 Epoch 9: Train Loss 0.2851, Valid Loss 0.2371
+2026-03-26 17:16:48,685 ----- Save best model - auprc: 0.7811 -----
+2026-03-26 17:17:36,037 [[3508  230]
+ [  44  251]]
+2026-03-26 17:17:36,040 AUC of ROC = 0.9624
+2026-03-26 17:17:36,040 AUC of PRC = 0.7639
+2026-03-26 17:17:36,040 min(+P, Se) = 0.7076
+2026-03-26 17:17:36,040 f1_score = 0.7201 (threshold = 0.5130)
+2026-03-26 17:17:36,040 Epoch 10: Train Loss 0.2727, Valid Loss 0.2530
+2026-03-26 17:18:26,837 [[3472  266]
+ [  41  254]]
+2026-03-26 17:18:26,839 AUC of ROC = 0.9602
+2026-03-26 17:18:26,839 AUC of PRC = 0.7724
+2026-03-26 17:18:26,839 min(+P, Se) = 0.7220
+2026-03-26 17:18:26,840 f1_score = 0.7257 (threshold = 0.9747)
+2026-03-26 17:18:26,840 Epoch 11: Train Loss 0.2635, Valid Loss 0.2576
+2026-03-26 17:19:13,631 [[3296  442]
+ [  30  265]]
+2026-03-26 17:19:13,634 AUC of ROC = 0.9625
+2026-03-26 17:19:13,634 AUC of PRC = 0.7837
+2026-03-26 17:19:13,634 min(+P, Se) = 0.7297
+2026-03-26 17:19:13,634 f1_score = 0.7328 (threshold = 1.6017)
+2026-03-26 17:19:13,634 Epoch 12: Train Loss 0.2520, Valid Loss 0.2590
+2026-03-26 17:19:13,634 ----- Save best model - auprc: 0.7837 -----
+2026-03-26 17:20:00,940 [[3200  538]
+ [  20  275]]
+2026-03-26 17:20:00,943 AUC of ROC = 0.9616
+2026-03-26 17:20:00,943 AUC of PRC = 0.7752
+2026-03-26 17:20:00,943 min(+P, Se) = 0.7340
+2026-03-26 17:20:00,943 f1_score = 0.7446 (threshold = 1.9089)
+2026-03-26 17:20:00,943 Epoch 13: Train Loss 0.2491, Valid Loss 0.2777
+2026-03-26 17:20:48,602 [[3576  162]
+ [  51  244]]
+2026-03-26 17:20:48,605 AUC of ROC = 0.9588
+2026-03-26 17:20:48,605 AUC of PRC = 0.7713
+2026-03-26 17:20:48,605 min(+P, Se) = 0.7224
+2026-03-26 17:20:48,605 f1_score = 0.7326 (threshold = 0.4176)
+2026-03-26 17:20:48,605 Epoch 14: Train Loss 0.2351, Valid Loss 0.2755
+2026-03-26 17:21:36,286 [[3494  244]
+ [  44  251]]
+2026-03-26 17:21:36,289 AUC of ROC = 0.9580
+2026-03-26 17:21:36,289 AUC of PRC = 0.7757
+2026-03-26 17:21:36,289 min(+P, Se) = 0.7186
+2026-03-26 17:21:36,289 f1_score = 0.7252 (threshold = 0.9620)
+2026-03-26 17:21:36,289 Epoch 15: Train Loss 0.2216, Valid Loss 0.2693
+2026-03-26 17:22:24,430 [[3481  257]
+ [  38  257]]
+2026-03-26 17:22:24,433 AUC of ROC = 0.9611
+2026-03-26 17:22:24,433 AUC of PRC = 0.7880
+2026-03-26 17:22:24,433 min(+P, Se) = 0.7390
+2026-03-26 17:22:24,433 f1_score = 0.7390 (threshold = 1.2170)
+2026-03-26 17:22:24,434 Epoch 16: Train Loss 0.2110, Valid Loss 0.2709
+2026-03-26 17:22:24,434 ----- Save best model - auprc: 0.7880 -----
+2026-03-26 17:23:10,893 [[3370  368]
+ [  34  261]]
+2026-03-26 17:23:10,896 AUC of ROC = 0.9575
+2026-03-26 17:23:10,896 AUC of PRC = 0.7848
+2026-03-26 17:23:10,896 min(+P, Se) = 0.7424
+2026-03-26 17:23:10,896 f1_score = 0.7478 (threshold = 1.6032)
+2026-03-26 17:23:10,897 Epoch 17: Train Loss 0.2055, Valid Loss 0.2749
+2026-03-26 17:23:57,455 [[3443  295]
+ [  40  255]]
+2026-03-26 17:23:57,458 AUC of ROC = 0.9572
+2026-03-26 17:23:57,458 AUC of PRC = 0.7791
+2026-03-26 17:23:57,458 min(+P, Se) = 0.7365
+2026-03-26 17:23:57,458 f1_score = 0.7438 (threshold = 1.4977)
+2026-03-26 17:23:57,459 Epoch 18: Train Loss 0.1974, Valid Loss 0.2688
+2026-03-26 17:24:44,253 [[3430  308]
+ [  38  257]]
+2026-03-26 17:24:44,256 AUC of ROC = 0.9560
+2026-03-26 17:24:44,256 AUC of PRC = 0.7831
+2026-03-26 17:24:44,256 min(+P, Se) = 0.7322
+2026-03-26 17:24:44,256 f1_score = 0.7391 (threshold = 1.6814)
+2026-03-26 17:24:44,257 Epoch 19: Train Loss 0.1829, Valid Loss 0.2841
+2026-03-26 17:25:30,351 [[3530  208]
+ [  48  247]]
+2026-03-26 17:25:30,354 AUC of ROC = 0.9564
+2026-03-26 17:25:30,354 AUC of PRC = 0.7887
+2026-03-26 17:25:30,354 min(+P, Se) = 0.7331
+2026-03-26 17:25:30,354 f1_score = 0.7397 (threshold = 1.2961)
+2026-03-26 17:25:30,355 Epoch 20: Train Loss 0.1766, Valid Loss 0.3079
+2026-03-26 17:25:30,355 ----- Save best model - auprc: 0.7887 -----
+2026-03-26 17:26:16,481 [[3435  303]
+ [  40  255]]
+2026-03-26 17:26:16,484 AUC of ROC = 0.9564
+2026-03-26 17:26:16,484 AUC of PRC = 0.7871
+2026-03-26 17:26:16,484 min(+P, Se) = 0.7288
+2026-03-26 17:26:16,484 f1_score = 0.7443 (threshold = 1.5417)
+2026-03-26 17:26:16,484 Epoch 21: Train Loss 0.1717, Valid Loss 0.2899
+2026-03-26 17:27:02,409 [[3404  334]
+ [  44  251]]
+2026-03-26 17:27:02,411 AUC of ROC = 0.9556
+2026-03-26 17:27:02,412 AUC of PRC = 0.7859
+2026-03-26 17:27:02,412 min(+P, Se) = 0.7322
+2026-03-26 17:27:02,412 f1_score = 0.7428 (threshold = 1.7799)
+2026-03-26 17:27:02,412 Epoch 22: Train Loss 0.1638, Valid Loss 0.2932
+2026-03-26 17:27:48,285 [[3483  255]
+ [  46  249]]
+2026-03-26 17:27:48,287 AUC of ROC = 0.9555
+2026-03-26 17:27:48,287 AUC of PRC = 0.7838
+2026-03-26 17:27:48,288 min(+P, Se) = 0.7273
+2026-03-26 17:27:48,288 f1_score = 0.7359 (threshold = 1.4045)
+2026-03-26 17:27:48,288 Epoch 23: Train Loss 0.1607, Valid Loss 0.3066
+2026-03-26 17:28:34,746 [[3462  276]
+ [  45  250]]
+2026-03-26 17:28:34,749 AUC of ROC = 0.9541
+2026-03-26 17:28:34,749 AUC of PRC = 0.7793
+2026-03-26 17:28:34,749 min(+P, Se) = 0.7288
+2026-03-26 17:28:34,749 f1_score = 0.7332 (threshold = 1.2982)
+2026-03-26 17:28:34,750 Epoch 24: Train Loss 0.1554, Valid Loss 0.3040
+2026-03-26 17:29:21,389 [[3473  265]
+ [  45  250]]
+2026-03-26 17:29:21,391 AUC of ROC = 0.9543
+2026-03-26 17:29:21,391 AUC of PRC = 0.7809
+2026-03-26 17:29:21,391 min(+P, Se) = 0.7288
+2026-03-26 17:29:21,392 f1_score = 0.7330 (threshold = 1.4095)
+2026-03-26 17:29:21,392 Epoch 25: Train Loss 0.1520, Valid Loss 0.3065
+2026-03-26 17:29:21,411 last saved model is in epoch 20
+2026-03-26 17:29:24,225 [[3552  200]
+ [  39  243]]
+2026-03-26 17:29:24,227 AUC of ROC = 0.9603
+2026-03-26 17:29:24,227 AUC of PRC = 0.8239
+2026-03-26 17:29:24,227 min(+P, Se) = 0.7518
+2026-03-26 17:29:24,228 f1_score = 0.7655 (threshold = 1.3535)
+2026-03-26 17:29:24,228 Test Loss 0.2682

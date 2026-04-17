@@ -1,0 +1,203 @@
+2026-02-24 02:06:15,384 {
+    "dataset": "mimic_lengthofstay",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 1234,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_lengthofstay/smart/seed_1234",
+    "local_rank": 0,
+    "min_mask_ratio": 0.0,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false
+}
+2026-02-24 15:20:48,372 {
+    "dataset": "mimic_lengthofstay",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 1234,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_lengthofstay/smart/seed_1234",
+    "local_rank": 0,
+    "min_mask_ratio": 0.0,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false
+}
+2026-02-24 23:57:28,836 {
+    "dataset": "mimic_lengthofstay",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 1234,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_lengthofstay/smart/seed_1234",
+    "local_rank": 0,
+    "min_mask_ratio": 0.0,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false
+}
+2026-02-24 23:57:40,777 Dataset Loaded.
+2026-02-24 23:59:17,406 Epoch 1: Train Loss 0.1490, Valid Loss 0.1177
+2026-02-24 23:59:17,407 ----- Save best model - L1: 0.1177 -----
+2026-02-25 00:00:52,952 Epoch 2: Train Loss 0.2106, Valid Loss 0.1186
+2026-02-25 00:02:29,057 Epoch 3: Train Loss 0.2308, Valid Loss 0.1365
+2026-02-25 00:04:04,812 Epoch 4: Train Loss 0.2654, Valid Loss 0.1490
+2026-02-25 00:05:41,381 Epoch 5: Train Loss 0.2883, Valid Loss 0.1527
+2026-02-25 00:07:17,485 Epoch 6: Train Loss 0.3035, Valid Loss 0.1615
+2026-02-25 00:08:53,480 Epoch 7: Train Loss 0.3063, Valid Loss 0.1565
+2026-02-25 00:10:29,355 Epoch 8: Train Loss 0.3111, Valid Loss 0.1628
+2026-02-25 00:12:06,774 Epoch 9: Train Loss 0.3215, Valid Loss 0.1679
+2026-02-25 00:13:42,703 Epoch 10: Train Loss 0.3288, Valid Loss 0.1740
+2026-02-25 00:15:18,377 Epoch 11: Train Loss 0.3366, Valid Loss 0.1731
+2026-02-25 00:16:54,068 Epoch 12: Train Loss 0.3407, Valid Loss 0.1805
+2026-02-25 00:18:30,022 Epoch 13: Train Loss 0.3384, Valid Loss 0.1792
+2026-02-25 00:20:06,017 Epoch 14: Train Loss 0.3331, Valid Loss 0.1800
+2026-02-25 00:21:41,821 Epoch 15: Train Loss 0.3299, Valid Loss 0.1717
+2026-02-25 00:23:18,567 Epoch 16: Train Loss 0.3232, Valid Loss 0.1727
+2026-02-25 00:24:54,483 Epoch 17: Train Loss 0.3229, Valid Loss 0.1785
+2026-02-25 00:26:30,644 Epoch 18: Train Loss 0.3241, Valid Loss 0.1776
+2026-02-25 00:28:08,070 Epoch 19: Train Loss 0.3261, Valid Loss 0.1818
+2026-02-25 00:29:44,053 Epoch 20: Train Loss 0.3290, Valid Loss 0.1793
+2026-02-25 00:31:19,822 Epoch 21: Train Loss 0.3329, Valid Loss 0.1844
+2026-02-25 00:32:55,332 Epoch 22: Train Loss 0.3364, Valid Loss 0.1872
+2026-02-25 00:34:31,302 Epoch 23: Train Loss 0.3394, Valid Loss 0.1919
+2026-02-25 00:36:07,725 Epoch 24: Train Loss 0.3419, Valid Loss 0.1871
+2026-02-25 00:37:43,557 Epoch 25: Train Loss 0.3433, Valid Loss 0.1868
+2026-02-25 00:37:43,611 last saved model is in epoch 1
+2026-02-25 00:37:49,432 Test Loss 0.1163
+2026-02-25 00:37:52,620 {
+    "dataset": "mimic_lengthofstay",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "freeze_epochs": 5,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 1234,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_lengthofstay/smart/seed_1234",
+    "local_rank": 0,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false
+}
+2026-02-25 00:38:07,532 Dataset Loaded.
+2026-02-25 00:38:08,183 last saved model is in epoch 1
+2026-02-25 00:38:37,510 MSE = 66.5429
+2026-02-25 00:38:37,510 MAE = 4.7736
+2026-02-25 00:38:37,510 Epoch 1: Train Loss 68.1077, Valid Loss 66.5429
+2026-02-25 00:38:37,511 ----- Save best model - mse: 66.5429 -----
+2026-02-25 00:39:06,794 MSE = 63.6728
+2026-02-25 00:39:06,794 MAE = 5.0459
+2026-02-25 00:39:06,795 Epoch 2: Train Loss 65.1625, Valid Loss 63.6728
+2026-02-25 00:39:06,795 ----- Save best model - mse: 63.6728 -----
+2026-02-25 00:39:36,374 MSE = 62.2058
+2026-02-25 00:39:36,374 MAE = 4.7063
+2026-02-25 00:39:36,375 Epoch 3: Train Loss 64.0310, Valid Loss 62.2058
+2026-02-25 00:39:36,375 ----- Save best model - mse: 62.2058 -----
+2026-02-25 00:40:05,777 MSE = 61.4044
+2026-02-25 00:40:05,780 MAE = 4.6955
+2026-02-25 00:40:05,788 Epoch 4: Train Loss 63.1778, Valid Loss 61.4044
+2026-02-25 00:40:05,796 ----- Save best model - mse: 61.4044 -----
+2026-02-25 00:40:35,183 MSE = 60.8495
+2026-02-25 00:40:35,184 MAE = 4.8609
+2026-02-25 00:40:35,188 Epoch 5: Train Loss 62.6746, Valid Loss 60.8495
+2026-02-25 00:40:35,190 ----- Save best model - mse: 60.8495 -----
+2026-02-25 00:41:38,329 MSE = 55.4471
+2026-02-25 00:41:38,332 MAE = 4.2816
+2026-02-25 00:41:38,333 Epoch 6: Train Loss 59.3450, Valid Loss 55.4471
+2026-02-25 00:41:38,335 ----- Save best model - mse: 55.4471 -----
+2026-02-25 00:42:43,293 MSE = 48.4668
+2026-02-25 00:42:43,296 MAE = 4.4818
+2026-02-25 00:42:43,300 Epoch 7: Train Loss 52.2591, Valid Loss 48.4668
+2026-02-25 00:42:43,301 ----- Save best model - mse: 48.4668 -----
+2026-02-25 00:43:46,214 MSE = 45.3054
+2026-02-25 00:43:46,221 MAE = 4.1567
+2026-02-25 00:43:46,228 Epoch 8: Train Loss 47.9409, Valid Loss 45.3054
+2026-02-25 00:43:46,230 ----- Save best model - mse: 45.3054 -----
+2026-02-25 00:44:49,182 MSE = 44.5998
+2026-02-25 00:44:49,183 MAE = 4.3852
+2026-02-25 00:44:49,185 Epoch 9: Train Loss 45.0245, Valid Loss 44.5998
+2026-02-25 00:44:49,186 ----- Save best model - mse: 44.5998 -----
+2026-02-25 00:45:52,153 MSE = 42.5470
+2026-02-25 00:45:52,153 MAE = 4.2125
+2026-02-25 00:45:52,153 Epoch 10: Train Loss 43.5489, Valid Loss 42.5470
+2026-02-25 00:45:52,154 ----- Save best model - mse: 42.5470 -----
+2026-02-25 00:46:54,935 MSE = 42.3004
+2026-02-25 00:46:54,936 MAE = 4.0233
+2026-02-25 00:46:54,940 Epoch 11: Train Loss 42.3159, Valid Loss 42.3004
+2026-02-25 00:46:54,942 ----- Save best model - mse: 42.3004 -----
+2026-02-25 00:47:57,835 MSE = 42.6125
+2026-02-25 00:47:57,835 MAE = 4.2475
+2026-02-25 00:47:57,836 Epoch 12: Train Loss 41.3801, Valid Loss 42.6125
+2026-02-25 00:49:00,860 MSE = 39.5906
+2026-02-25 00:49:00,861 MAE = 4.1082
+2026-02-25 00:49:00,862 Epoch 13: Train Loss 40.4867, Valid Loss 39.5906
+2026-02-25 00:49:00,863 ----- Save best model - mse: 39.5906 -----
+2026-02-25 00:50:04,320 MSE = 39.7007
+2026-02-25 00:50:04,321 MAE = 3.8396
+2026-02-25 00:50:04,323 Epoch 14: Train Loss 40.0200, Valid Loss 39.7007
+2026-02-25 00:51:07,460 MSE = 38.5913
+2026-02-25 00:51:07,460 MAE = 4.0122
+2026-02-25 00:51:07,461 Epoch 15: Train Loss 39.5016, Valid Loss 38.5913
+2026-02-25 00:51:07,461 ----- Save best model - mse: 38.5913 -----
+2026-02-25 00:52:10,323 MSE = 38.6888
+2026-02-25 00:52:10,324 MAE = 3.9900
+2026-02-25 00:52:10,324 Epoch 16: Train Loss 38.8384, Valid Loss 38.6888
+2026-02-25 00:53:13,057 MSE = 38.8644
+2026-02-25 00:53:13,058 MAE = 3.8409
+2026-02-25 00:53:13,059 Epoch 17: Train Loss 38.5156, Valid Loss 38.8644
+2026-02-25 00:54:15,883 MSE = 37.5198
+2026-02-25 00:54:15,884 MAE = 3.8480
+2026-02-25 00:54:15,884 Epoch 18: Train Loss 38.2329, Valid Loss 37.5198
+2026-02-25 00:54:15,884 ----- Save best model - mse: 37.5198 -----
+2026-02-25 00:55:18,891 MSE = 38.3962
+2026-02-25 00:55:18,893 MAE = 3.9248
+2026-02-25 00:55:18,895 Epoch 19: Train Loss 37.9941, Valid Loss 38.3962
+2026-02-25 00:56:21,973 MSE = 37.0042
+2026-02-25 00:56:21,973 MAE = 3.7774
+2026-02-25 00:56:21,974 Epoch 20: Train Loss 37.7298, Valid Loss 37.0041
+2026-02-25 00:56:21,974 ----- Save best model - mse: 37.0042 -----
+2026-02-25 00:57:26,564 MSE = 36.9042
+2026-02-25 00:57:26,564 MAE = 3.7349
+2026-02-25 00:57:26,568 Epoch 21: Train Loss 37.3716, Valid Loss 36.9042
+2026-02-25 00:57:26,568 ----- Save best model - mse: 36.9042 -----
+2026-02-25 00:58:29,446 MSE = 37.0150
+2026-02-25 00:58:29,446 MAE = 3.7763
+2026-02-25 00:58:29,447 Epoch 22: Train Loss 37.0359, Valid Loss 37.0150
+2026-02-25 00:59:32,266 MSE = 36.2507
+2026-02-25 00:59:32,267 MAE = 3.6467
+2026-02-25 00:59:32,270 Epoch 23: Train Loss 36.8952, Valid Loss 36.2507
+2026-02-25 00:59:32,273 ----- Save best model - mse: 36.2507 -----
+2026-02-25 01:00:34,941 MSE = 37.2772
+2026-02-25 01:00:34,941 MAE = 3.6687
+2026-02-25 01:00:34,942 Epoch 24: Train Loss 36.7765, Valid Loss 37.2772
+2026-02-25 01:01:37,595 MSE = 36.1541
+2026-02-25 01:01:37,595 MAE = 3.6258
+2026-02-25 01:01:37,596 Epoch 25: Train Loss 36.4840, Valid Loss 36.1541
+2026-02-25 01:01:37,596 ----- Save best model - mse: 36.1541 -----
+2026-02-25 01:01:37,753 last saved model is in epoch 25
+2026-02-25 01:01:40,745 MSE = 33.7040
+2026-02-25 01:01:40,746 MAE = 3.5506
+2026-02-25 01:01:40,748 Test Loss 33.7040

@@ -1199,28 +1199,41 @@ class SMILEv2BasicBlock(nn.Module):
     """
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, proj_drop=0.,
-                 act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 abl_no_mnar_bias=False, abl_no_cross_attn=False):
         super().__init__()
+        self.abl_no_mnar_bias = abl_no_mnar_bias
+        self.abl_no_cross_attn = abl_no_cross_attn
         self.seq_att_block = SeqAttBlock(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
             proj_drop=proj_drop, norm_layer=norm_layer,
         )
-        self.var_att_block = MNARBiasVarAttBlock(
-            dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
-            proj_drop=proj_drop, norm_layer=norm_layer,
-        )
+        if abl_no_mnar_bias:
+            self.var_att_block = VarAttBlock(
+                dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
+                proj_drop=proj_drop, norm_layer=norm_layer,
+            )
+        else:
+            self.var_att_block = MNARBiasVarAttBlock(
+                dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
+                proj_drop=proj_drop, norm_layer=norm_layer,
+            )
         self.mlp = MLPBlock(
             dim=dim, mlp_ratio=mlp_ratio, proj_drop=proj_drop,
             act_layer=act_layer, norm_layer=norm_layer,
         )
-        self.mnar_cross_attn = MNARCrossAttention(dim, num_heads, proj_drop=proj_drop)
+        if not abl_no_cross_attn:
+            self.mnar_cross_attn = MNARCrossAttention(dim, num_heads, proj_drop=proj_drop)
 
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, mnar_emb=None):
         lens_mask = lens_mask.repeat_interleave(x.shape[1], dim=0)
         x = self.seq_att_block(x, mask, lens, lens_mask)
-        x = self.var_att_block(x, mask, lens, lens_mask, mnar_cooccur)
+        if self.abl_no_mnar_bias:
+            x = self.var_att_block(x, mask, lens, lens_mask)
+        else:
+            x = self.var_att_block(x, mask, lens, lens_mask, mnar_cooccur)
         x = self.mlp(x)
-        if mnar_emb is not None:
+        if (not self.abl_no_cross_attn) and mnar_emb is not None:
             x = x + self.mnar_cross_attn(x, mnar_emb)
         return x
 
@@ -1249,6 +1262,10 @@ class SMILEv2Encoder(nn.Module):
 
     def __init__(self, args):
         super().__init__()
+        self.abl_no_density = getattr(args, 'abl_no_density', False)
+        self.abl_no_mnar_bias = getattr(args, 'abl_no_mnar_bias', False)
+        self.abl_no_cross_attn = getattr(args, 'abl_no_cross_attn', False)
+        self.abl_no_mnar_cls = getattr(args, 'abl_no_mnar_cls', False)
         self.embedder = MLPEmbedder(args.d_model)
         self.query = nn.Parameter(torch.zeros(args.input_dim, 1, args.d_model))
         self.query.data.normal_(mean=0.0, std=0.02)
@@ -1258,30 +1275,36 @@ class SMILEv2Encoder(nn.Module):
         if hasattr(args, 'var_order_idx') and hasattr(args, 'inv_order_idx'):
             self.mnar_encoder.set_variable_order(args.var_order_idx, args.inv_order_idx)
 
-        self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
-        self.obs_density_embedder = ObsDensityEmbedder(
-            args.d_model, window_size=getattr(args, 'obs_density_window', 5)
-        )
+        if not self.abl_no_mnar_bias:
+            self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
+        if not self.abl_no_density:
+            self.obs_density_embedder = ObsDensityEmbedder(
+                args.d_model, window_size=getattr(args, 'obs_density_window', 5)
+            )
 
         self.blocks = nn.ModuleList([
             SMILEv2BasicBlock(
                 dim=args.d_model, num_heads=args.n_heads, mlp_ratio=4.,
                 qkv_bias=False, proj_drop=args.dropout,
+                abl_no_mnar_bias=self.abl_no_mnar_bias,
+                abl_no_cross_attn=self.abl_no_cross_attn,
             )
             for _ in range(args.e_layers)
         ])
 
-        self.mnar_time_pool = nn.Linear(args.d_model, 1)
-        nn.init.zeros_(self.mnar_time_pool.weight)
-        nn.init.zeros_(self.mnar_time_pool.bias)
-        self.mnar_cls_proj = nn.Linear(args.d_model, args.d_model)
-        nn.init.normal_(self.mnar_cls_proj.weight, std=0.01)
-        nn.init.zeros_(self.mnar_cls_proj.bias)
-        # Project mean observation density to d_model and inject into CLS token.
-        # Zero-init: no contribution at init; learned as training progresses.
-        self.cls_density_proj = nn.Linear(args.d_model, args.d_model)
-        nn.init.zeros_(self.cls_density_proj.weight)
-        nn.init.zeros_(self.cls_density_proj.bias)
+        if not self.abl_no_mnar_cls:
+            self.mnar_time_pool = nn.Linear(args.d_model, 1)
+            nn.init.zeros_(self.mnar_time_pool.weight)
+            nn.init.zeros_(self.mnar_time_pool.bias)
+            self.mnar_cls_proj = nn.Linear(args.d_model, args.d_model)
+            nn.init.normal_(self.mnar_cls_proj.weight, std=0.01)
+            nn.init.zeros_(self.mnar_cls_proj.bias)
+        if not self.abl_no_density:
+            # Project mean observation density to d_model and inject into CLS token.
+            # Zero-init: no contribution at init; learned as training progresses.
+            self.cls_density_proj = nn.Linear(args.d_model, args.d_model)
+            nn.init.zeros_(self.cls_density_proj.weight)
+            nn.init.zeros_(self.cls_density_proj.bias)
 
     def forward(self, x, lens, mask, original_mask=None, **kwargs):
         x = self.embedder(x, mask)                              # (B, V, T, d)
@@ -1294,10 +1317,12 @@ class SMILEv2Encoder(nn.Module):
             # Encode missing patterns via dual-branch 1D+2D CNN
             mnar_emb = self.mnar_encoder(original_mask)         # (B, V, T, d)
             # MNAR co-occurrence matrix for attention bias
-            mnar_cooccur = self.mnar_cooccur_encoder(original_mask)  # (B, V, V)
+            if not self.abl_no_mnar_bias:
+                mnar_cooccur = self.mnar_cooccur_encoder(original_mask)  # (B, V, V)
             # Observation density embedding (zero-init -> no-op at init)
-            obs_density_emb = self.obs_density_embedder(original_mask)  # (B, V, T, d)
-            x = x + obs_density_emb
+            if not self.abl_no_density:
+                obs_density_emb = self.obs_density_embedder(original_mask)  # (B, V, T, d)
+                x = x + obs_density_emb
             cls_pad = torch.zeros(
                 mnar_emb.shape[0], mnar_emb.shape[1], 1, mnar_emb.shape[3],
                 device=mnar_emb.device, dtype=mnar_emb.dtype
@@ -1334,7 +1359,7 @@ class SMILEv2Encoder(nn.Module):
             x = block(x, mask_full, lens, lens_mask, mnar_cooccur, mnar_emb_padded)
 
         # Attention-pooled global MNAR -> CLS token injection
-        if mnar_emb is not None:
+        if (not self.abl_no_mnar_cls) and mnar_emb is not None:
             attn_scores = self.mnar_time_pool(mnar_emb)         # (B, V, T, 1)
             attn_w = torch.softmax(attn_scores, dim=2)
             global_mnar = self.mnar_cls_proj(
@@ -1411,29 +1436,42 @@ class SMILEv2FiLMBasicBlock(nn.Module):
     """
 
     def __init__(self, dim, num_heads, time_dim, mlp_ratio=4., qkv_bias=False,
-                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 abl_no_mnar_bias=False, abl_no_cross_attn=False):
         super().__init__()
+        self.abl_no_mnar_bias = abl_no_mnar_bias
+        self.abl_no_cross_attn = abl_no_cross_attn
         self.seq_att_block = SeqAttBlock(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
             proj_drop=proj_drop, norm_layer=norm_layer,
         )
-        self.var_att_block = MNARBiasFiLMVarAttBlock(
-            dim=dim, num_heads=num_heads, time_dim=time_dim,
-            qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
-        )
+        if abl_no_mnar_bias:
+            self.var_att_block = TimeFiLMVarAttBlock(
+                dim=dim, num_heads=num_heads, time_dim=time_dim,
+                qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
+            )
+        else:
+            self.var_att_block = MNARBiasFiLMVarAttBlock(
+                dim=dim, num_heads=num_heads, time_dim=time_dim,
+                qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
+            )
         self.mlp = TimeFiLMMLPBlock(
             dim=dim, time_dim=time_dim, mlp_ratio=mlp_ratio,
             proj_drop=proj_drop, act_layer=act_layer, norm_layer=norm_layer,
         )
-        self.mnar_cross_attn = MNARCrossAttention(dim, num_heads, proj_drop=proj_drop)
+        if not abl_no_cross_attn:
+            self.mnar_cross_attn = MNARCrossAttention(dim, num_heads, proj_drop=proj_drop)
 
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, mnar_emb=None,
                 time_enc=None):
         lens_mask = lens_mask.repeat_interleave(x.shape[1], dim=0)
         x = self.seq_att_block(x, mask, lens, lens_mask)
-        x = self.var_att_block(x, mask, lens, lens_mask, mnar_cooccur, time_enc)
+        if self.abl_no_mnar_bias:
+            x = self.var_att_block(x, mask, lens, lens_mask, time_enc)
+        else:
+            x = self.var_att_block(x, mask, lens, lens_mask, mnar_cooccur, time_enc)
         x = self.mlp(x, time_enc)
-        if mnar_emb is not None:
+        if (not self.abl_no_cross_attn) and mnar_emb is not None:
             x = x + self.mnar_cross_attn(x, mnar_emb)
         return x
 
@@ -1517,6 +1555,10 @@ class SMILEv2FiLMEncoder(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.time_dim = getattr(args, 'time_dim', 16)
+        self.abl_no_density = getattr(args, 'abl_no_density', False)
+        self.abl_no_mnar_bias = getattr(args, 'abl_no_mnar_bias', False)
+        self.abl_no_cross_attn = getattr(args, 'abl_no_cross_attn', False)
+        self.abl_no_mnar_cls = getattr(args, 'abl_no_mnar_cls', False)
         self.embedder = MLPEmbedder(args.d_model)
         self.query = nn.Parameter(torch.zeros(args.input_dim, 1, args.d_model))
         self.query.data.normal_(mean=0.0, std=0.02)
@@ -1525,26 +1567,32 @@ class SMILEv2FiLMEncoder(nn.Module):
         self.mnar_encoder = MissingPatternEncoder(args.d_model)
         if hasattr(args, 'var_order_idx') and hasattr(args, 'inv_order_idx'):
             self.mnar_encoder.set_variable_order(args.var_order_idx, args.inv_order_idx)
-        self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
-        self.obs_density_embedder = ObsDensityEmbedder(
-            args.d_model, window_size=getattr(args, 'obs_density_window', 5)
-        )
+        if not self.abl_no_mnar_bias:
+            self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
+        if not self.abl_no_density:
+            self.obs_density_embedder = ObsDensityEmbedder(
+                args.d_model, window_size=getattr(args, 'obs_density_window', 5)
+            )
         self.blocks = nn.ModuleList([
             SMILEv2FiLMBasicBlock(
                 dim=args.d_model, num_heads=args.n_heads, time_dim=self.time_dim,
                 mlp_ratio=4., qkv_bias=False, proj_drop=args.dropout,
+                abl_no_mnar_bias=self.abl_no_mnar_bias,
+                abl_no_cross_attn=self.abl_no_cross_attn,
             )
             for _ in range(args.e_layers)
         ])
-        self.mnar_time_pool = nn.Linear(args.d_model, 1)
-        nn.init.zeros_(self.mnar_time_pool.weight)
-        nn.init.zeros_(self.mnar_time_pool.bias)
-        self.mnar_cls_proj = nn.Linear(args.d_model, args.d_model)
-        nn.init.normal_(self.mnar_cls_proj.weight, std=0.01)
-        nn.init.zeros_(self.mnar_cls_proj.bias)
-        self.cls_density_proj = nn.Linear(args.d_model, args.d_model)
-        nn.init.zeros_(self.cls_density_proj.weight)
-        nn.init.zeros_(self.cls_density_proj.bias)
+        if not self.abl_no_mnar_cls:
+            self.mnar_time_pool = nn.Linear(args.d_model, 1)
+            nn.init.zeros_(self.mnar_time_pool.weight)
+            nn.init.zeros_(self.mnar_time_pool.bias)
+            self.mnar_cls_proj = nn.Linear(args.d_model, args.d_model)
+            nn.init.normal_(self.mnar_cls_proj.weight, std=0.01)
+            nn.init.zeros_(self.mnar_cls_proj.bias)
+        if not self.abl_no_density:
+            self.cls_density_proj = nn.Linear(args.d_model, args.d_model)
+            nn.init.zeros_(self.cls_density_proj.weight)
+            nn.init.zeros_(self.cls_density_proj.bias)
 
     def forward(self, x, lens, mask, time=None, original_mask=None, **kwargs):
         x = self.embedder(x, mask)                              # (B, V, T, d)
@@ -1555,9 +1603,11 @@ class SMILEv2FiLMEncoder(nn.Module):
         obs_density_emb = None
         if original_mask is not None:
             mnar_emb = self.mnar_encoder(original_mask)         # (B, V, T, d)
-            mnar_cooccur = self.mnar_cooccur_encoder(original_mask)  # (B, V, V)
-            obs_density_emb = self.obs_density_embedder(original_mask)  # (B, V, T, d)
-            x = x + obs_density_emb
+            if not self.abl_no_mnar_bias:
+                mnar_cooccur = self.mnar_cooccur_encoder(original_mask)  # (B, V, V)
+            if not self.abl_no_density:
+                obs_density_emb = self.obs_density_embedder(original_mask)  # (B, V, T, d)
+                x = x + obs_density_emb
             cls_pad = torch.zeros(
                 mnar_emb.shape[0], mnar_emb.shape[1], 1, mnar_emb.shape[3],
                 device=mnar_emb.device, dtype=mnar_emb.dtype
@@ -1600,7 +1650,7 @@ class SMILEv2FiLMEncoder(nn.Module):
                       time_enc)
 
         # Attention-pooled global MNAR -> CLS token injection
-        if mnar_emb is not None:
+        if (not self.abl_no_mnar_cls) and mnar_emb is not None:
             attn_scores = self.mnar_time_pool(mnar_emb)         # (B, V, T, 1)
             attn_w = torch.softmax(attn_scores, dim=2)
             global_mnar = self.mnar_cls_proj(
@@ -1750,28 +1800,32 @@ class PolicyDensityEmbedder(nn.Module):
     Output: (B, V, T, d_model)
     """
 
-    def __init__(self, d_model):
+    def __init__(self, d_model, use_policy_tokens=True):
         super().__init__()
+        self.use_policy_tokens = use_policy_tokens
         self.embed = nn.Sequential(
             nn.Linear(3, d_model),
             nn.Linear(d_model, d_model),
         )
-        # Learnable policy tokens (small random init)
-        self.embed_observed = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
-        self.embed_recent_missing = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
-        self.embed_long_missing = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
-        # Learned recency gate: density -> soft weight (variable-adaptive)
-        self.recency_gate = nn.Sequential(
-            nn.Linear(1, d_model // 4),
-            nn.GELU(),
-            nn.Linear(d_model // 4, 1),
-            nn.Sigmoid(),
-        )
+        if use_policy_tokens:
+            # Learnable policy tokens (small random init)
+            self.embed_observed = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
+            self.embed_recent_missing = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
+            self.embed_long_missing = nn.Parameter(torch.randn(1, 1, 1, d_model) * 0.02)
+            # Learned recency gate: density -> soft weight (variable-adaptive)
+            self.recency_gate = nn.Sequential(
+                nn.Linear(1, d_model // 4),
+                nn.GELU(),
+                nn.Linear(d_model // 4, 1),
+                nn.Sigmoid(),
+            )
 
     def forward(self, x, mask, density, original_mask=None):
         # Continuous feature projection
         inp = torch.stack((x, mask, density), dim=-1)   # (B, T, V, 3)
         out = self.embed(inp)                            # (B, T, V, d_model)
+        if not self.use_policy_tokens:
+            return out.permute(0, 2, 1, 3)              # (B, V, T, d_model)
 
         # Determine missing status from clean mask if available
         if original_mask is not None:
@@ -1931,21 +1985,27 @@ class DynamicMNARBiasFiLMVarAttBlock(nn.Module):
     """
 
     def __init__(self, dim, num_heads, time_dim, qkv_bias=False, proj_drop=0.,
-                 norm_layer=nn.LayerNorm):
+                 norm_layer=nn.LayerNorm, use_mnar_bias=True, use_time_mnar=True,
+                 use_film=True):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.num_heads = num_heads
+        self.use_mnar_bias = use_mnar_bias
+        self.use_time_mnar = use_time_mnar
+        self.use_film = use_film
         self.attn_var = DynamicMNARBiasVarAttention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, proj_drop=proj_drop
         )
-        # Post-attention FiLM (zero-init = identity)
-        self.film_gen = nn.Linear(time_dim, 2 * dim)
-        nn.init.zeros_(self.film_gen.weight)
-        nn.init.zeros_(self.film_gen.bias)
-        # Variable-level time decay projection (zero-init)
-        self.var_time_proj = nn.Linear(time_dim, num_heads)
-        nn.init.zeros_(self.var_time_proj.weight)
-        nn.init.zeros_(self.var_time_proj.bias)
+        if use_film:
+            # Post-attention FiLM (zero-init = identity)
+            self.film_gen = nn.Linear(time_dim, 2 * dim)
+            nn.init.zeros_(self.film_gen.weight)
+            nn.init.zeros_(self.film_gen.bias)
+        if use_time_mnar:
+            # Variable-level time decay projection (zero-init)
+            self.var_time_proj = nn.Linear(time_dim, num_heads)
+            nn.init.zeros_(self.var_time_proj.weight)
+            nn.init.zeros_(self.var_time_proj.bias)
 
     def compute_var_time_decay(self, time_enc, mask):
         """Compute variable-level pairwise time decay for MNAR bias modulation.
@@ -1970,12 +2030,13 @@ class DynamicMNARBiasFiLMVarAttBlock(nn.Module):
 
     def forward(self, x, mask, lens, lens_mask, mnar_cooccur=None, time_enc=None):
         var_decay = None
-        if time_enc is not None and mnar_cooccur is not None:
+        if self.use_time_mnar and time_enc is not None and mnar_cooccur is not None:
             var_decay = self.compute_var_time_decay(time_enc, mask)
 
+        mnar_bias = mnar_cooccur if self.use_mnar_bias else None
         attn_out = self.attn_var(self.norm1(x), mask, lens, lens_mask,
-                                  mnar_cooccur, var_decay)
-        if time_enc is not None:
+                                  mnar_bias, var_decay)
+        if self.use_film and time_enc is not None:
             film = self.film_gen(time_enc)              # (B, T+1, 2*dim)
             gamma, beta = film.chunk(2, dim=-1)
             attn_out = (1.0 + gamma.unsqueeze(1)) * attn_out + beta.unsqueeze(1)
@@ -1992,7 +2053,8 @@ class SMILELeanV2BasicBlock(nn.Module):
     """
 
     def __init__(self, dim, num_heads, time_dim, mlp_ratio=4., qkv_bias=False,
-                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 proj_drop=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 abl_no_mnar_bias=False, abl_no_time_mnar=False, abl_no_film=False):
         super().__init__()
         self.seq_att_block = SeqAttBlock(
             dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
@@ -2001,6 +2063,9 @@ class SMILELeanV2BasicBlock(nn.Module):
         self.var_att_block = DynamicMNARBiasFiLMVarAttBlock(
             dim=dim, num_heads=num_heads, time_dim=time_dim,
             qkv_bias=qkv_bias, proj_drop=proj_drop, norm_layer=norm_layer,
+            use_mnar_bias=not abl_no_mnar_bias,
+            use_time_mnar=not abl_no_time_mnar,
+            use_film=not abl_no_film,
         )
         self.mlp = MLPBlock(
             dim=dim, mlp_ratio=mlp_ratio,
@@ -2038,9 +2103,18 @@ class SMILELeanV2Encoder(nn.Module):
         self.time_dim = getattr(args, 'time_dim', 16)
         self.obs_density_window = getattr(args, 'obs_density_window', 5)
         self.use_time_pe = getattr(args, 'v2_use_time_pe', False)
+        self.abl_no_density = getattr(args, 'abl_no_density', False)
+        self.abl_no_policy = getattr(args, 'abl_no_policy', False)
+        self.abl_no_mnar_bias = getattr(args, 'abl_no_mnar_bias', False)
+        self.abl_no_dynamic_mnar = getattr(args, 'abl_no_dynamic_mnar', False)
+        self.abl_no_time_mnar = getattr(args, 'abl_no_time_mnar', False)
+        self.abl_no_film = getattr(args, 'abl_no_film', False)
 
         # PolicyDensityEmbedder replaces DensityMLPEmbedder
-        self.embedder = PolicyDensityEmbedder(args.d_model)
+        self.embedder = PolicyDensityEmbedder(
+            args.d_model,
+            use_policy_tokens=not self.abl_no_policy,
+        )
         self.query = nn.Parameter(torch.zeros(args.input_dim, 1, args.d_model))
         self.query.data.normal_(mean=0.0, std=0.02)
         self.position_enc = PositionalEncoding(args.d_model, n_position=args.max_len + 1)
@@ -2053,22 +2127,29 @@ class SMILELeanV2Encoder(nn.Module):
             nn.init.zeros_(self.time_pe_proj.bias)
 
         # Dynamic MNAR co-occurrence encoder
-        self.mnar_cooccur_encoder = DynamicMNARCooccurrenceEncoder(
-            window_size=self.obs_density_window
-        )
+        if not self.abl_no_mnar_bias:
+            if self.abl_no_dynamic_mnar:
+                self.mnar_cooccur_encoder = MNARCooccurrenceEncoder()
+            else:
+                self.mnar_cooccur_encoder = DynamicMNARCooccurrenceEncoder(
+                    window_size=self.obs_density_window
+                )
 
         # V2 transformer blocks
         self.blocks = nn.ModuleList([
             SMILELeanV2BasicBlock(
                 dim=args.d_model, num_heads=args.n_heads, time_dim=self.time_dim,
                 mlp_ratio=4., qkv_bias=False, proj_drop=args.dropout,
+                abl_no_mnar_bias=self.abl_no_mnar_bias,
+                abl_no_time_mnar=self.abl_no_time_mnar,
+                abl_no_film=self.abl_no_film,
             )
             for _ in range(args.e_layers)
         ])
 
     def forward(self, x, lens, mask, time=None, original_mask=None, **kwargs):
         # Compute local observation density
-        if original_mask is not None:
+        if (not self.abl_no_density) and original_mask is not None:
             B_m, T_m, V_m = original_mask.shape
             ws = self.obs_density_window
             m = original_mask.float().permute(0, 2, 1).reshape(B_m * V_m, 1, T_m)
@@ -2082,8 +2163,14 @@ class SMILELeanV2Encoder(nn.Module):
 
         # Dynamic MNAR co-occurrence
         mnar_cooccur = None
-        if original_mask is not None:
-            mnar_cooccur = self.mnar_cooccur_encoder(original_mask)  # (B, T+1, V, V)
+        if (not self.abl_no_mnar_bias) and original_mask is not None:
+            if self.abl_no_dynamic_mnar:
+                static_mnar = self.mnar_cooccur_encoder(original_mask)     # (B, V, V)
+                num_frames = x.shape[2] + 1
+                mnar_cooccur = static_mnar.unsqueeze(1).repeat(1, num_frames, 1, 1)
+                mnar_cooccur[:, 0] = 0.0
+            else:
+                mnar_cooccur = self.mnar_cooccur_encoder(original_mask)    # (B, T+1, V, V)
 
         # CLS token
         x = torch.cat(
