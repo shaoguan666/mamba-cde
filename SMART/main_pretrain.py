@@ -15,7 +15,13 @@ from data.challenge2019 import load_challenge_2019
 from data.mimiciii import load_mimic_iii_mortality, load_mimic_iii_phenotyping, load_mimic_iii_decompensation, load_mimic_iii_lengthofstay
 from data.dataloader import collate_fn
 from models.smart import EmbeddingDecoder
-from utils.utils import set_seed, distributed_init, init_logging
+from utils.utils import (
+    set_seed,
+    distributed_init,
+    init_logging,
+    configure_torch_runtime,
+    build_dataloader_kwargs,
+)
 from utils.variable_order import get_variable_order
 
 
@@ -415,6 +421,8 @@ if __name__ == "__main__":
     parser.add_argument('--d_model', type=int, default=32)
     parser.add_argument('--seed', type=int, default=3407) 
     parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--num-workers', type=int, default=None,
+                        help='DataLoader workers per process. Defaults to a conservative auto setting.')
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--save_model', type=bool, default=True)
     parser.add_argument('--save_dir', type=str, default='./export/')
@@ -499,7 +507,6 @@ if __name__ == "__main__":
         'no-mnar-cls': args.abl_no_mnar_cls,
         'no-policy': args.abl_no_policy,
         'no-dynamic-mnar': args.abl_no_dynamic_mnar,
-        'no-dual-head': args.abl_no_dual_head,
     }
     _abl_suffix = '-'.join(k for k, v in _abl_flags.items() if v)
     if args.use_smile_lean_samepretrain:
@@ -568,6 +575,8 @@ if __name__ == "__main__":
     if getattr(args, 'pretrain_mask_mode', 'fixed') == 'proportional_var':
         model_name = model_name + '-pmae'
     args.save_dir = os.path.join(args.save_dir, args.dataset, model_name, f'seed_{args.seed}')
+    distributed_init(args)
+    configure_torch_runtime()
     if args.local_rank == 0 and args.save_model and not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
     if args.local_rank == 0:
@@ -577,7 +586,6 @@ if __name__ == "__main__":
         logger = None
     log(logger, json.dumps(vars(args), indent=4))
     set_seed(args.seed)
-    distributed_init(args)
 
     if args.dataset == 'c12':
         args.input_dim = 37
@@ -615,7 +623,10 @@ if __name__ == "__main__":
         args.num_class = 1
         args.max_len = 24
         args.max_mask_ratio = 0.75
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_lengthofstay()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_lengthofstay(
+            task='regression',
+            label_unit='auto',
+        )
     else:
         raise Exception("Dataset not exist!")
     if args.data_dropout > 0:
@@ -626,6 +637,8 @@ if __name__ == "__main__":
     feature_names = getattr(train_dataset, 'feature_names', [])
     system_groups = get_mask_system_groups(args.dataset, feature_names)
     log(logger, f'system_groups: { {k: len(v) for k, v in system_groups.items()} }')
+    dataloader_kwargs = build_dataloader_kwargs(args)
+    log(logger, f'DataLoader kwargs: {dataloader_kwargs}')
     if args.dataset != 'all':
         if args.distributed:
             train_sampler = DistributedSampler(train_dataset, num_replicas=args.world_size, rank=args.rank, shuffle=True, drop_last=True)
@@ -635,24 +648,42 @@ if __name__ == "__main__":
             train_sampler = RandomSampler(train_dataset)
             val_sampler = SequentialSampler(val_dataset)
             test_sampler = SequentialSampler(test_dataset)
-        train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler, collate_fn=collate_fn)
-        val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, sampler=val_sampler, collate_fn=collate_fn)
-        test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=test_sampler, collate_fn=collate_fn)
+        train_dataloader = DataLoader(
+            train_dataset, batch_size=args.batch_size, sampler=train_sampler,
+            collate_fn=collate_fn, **dataloader_kwargs
+        )
+        val_dataloader = DataLoader(
+            val_dataset, batch_size=args.batch_size, sampler=val_sampler,
+            collate_fn=collate_fn, **dataloader_kwargs
+        )
+        test_dataloader = DataLoader(
+            test_dataset, batch_size=args.batch_size, sampler=test_sampler,
+            collate_fn=collate_fn, **dataloader_kwargs
+        )
 
     var_order_idx, inv_order_idx = get_variable_order(
         args.dataset.split('_')[0] if args.dataset.startswith('mimic') else args.dataset
     )
+    log(logger, 'Runtime init: variable order resolved.')
     args.var_order_idx = var_order_idx.cuda()
     args.inv_order_idx = inv_order_idx.cuda()
+    log(logger, 'Runtime init: variable order moved to CUDA.')
 
     encoder = Encoder(args).cuda()
+    log(logger, 'Runtime init: encoder moved to CUDA.')
     predictor = EmbeddingDecoder(args).cuda()
+    log(logger, 'Runtime init: predictor moved to CUDA.')
     target_encoder = copy.deepcopy(encoder)
+    log(logger, 'Runtime init: target encoder copied.')
     
     if args.distributed:
-        encoder = torch.nn.parallel.DistributedDataParallel(encoder, static_graph=True, device_ids=[args.gpu], output_device=args.local_rank, find_unused_parameters=True)
-        predictor = torch.nn.parallel.DistributedDataParallel(predictor, static_graph=True, device_ids=[args.gpu], output_device=args.local_rank, find_unused_parameters=True)
-        target_encoder = torch.nn.parallel.DistributedDataParallel(target_encoder, device_ids=[args.gpu], output_device=args.local_rank, find_unused_parameters=True)
+        encoder = torch.nn.parallel.DistributedDataParallel(
+            encoder, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=True
+        )
+        predictor = torch.nn.parallel.DistributedDataParallel(
+            predictor, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=True
+        )
+        log(logger, 'Runtime init: DDP wrap complete.')
     for p in target_encoder.parameters():
         p.requires_grad = False
         
@@ -707,6 +738,8 @@ if __name__ == "__main__":
         encoder.train()
         predictor.train()
         target_encoder.eval()  # EMA target: eval mode prevents dropout noise in targets
+        if args.distributed and isinstance(train_sampler, DistributedSampler):
+            train_sampler.set_epoch(i - 1)
         # Scheme D: build per-epoch stratified schedule (deterministic shuffle)
         if args.smile_stratified:
             _strat_schedule = _build_stratified_schedule(
@@ -715,7 +748,7 @@ if __name__ == "__main__":
         batch_bar = tqdm(train_dataloader, desc=f'  Ep{i:>3}', leave=False, unit='batch')
         for step, batch in enumerate(batch_bar, 1):
             for key in batch:
-                batch[key] = batch[key].cuda()
+                batch[key] = batch[key].cuda(non_blocking=True)
             # Clean policy mask is never corrupted; input visibility mask may be.
             policy_mask_clean = batch['mask'].clone()
             mnar_drop = get_mnar_dropout_rate(i, args.epochs, args.smile_mnar_dropout)
@@ -771,7 +804,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             for batch in val_dataloader:
                 for key in batch:
-                    batch[key] = batch[key].cuda()
+                    batch[key] = batch[key].cuda(non_blocking=True)
                 # Val uses clean mask: stable metric consistent with finetune val
                 # samepretrain: always None (no MNAR encoder, same as training)
                 policy_mask_clean = None

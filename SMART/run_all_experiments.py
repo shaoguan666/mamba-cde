@@ -116,23 +116,89 @@ def finetune_ckpt(dataset, model_name, seed):
     )
 
 
-def run_cmd(cmd, tag, dry_run):
+def pretrain_source_model(model_name):
+    """Return the model name whose pretrain checkpoint should be reused."""
+    if model_name == 'smart-smile-lean-v2-no-dual-head':
+        return 'smart-smile-lean-v2'
+    return model_name
+
+
+def launch_prefix(args, run_idx):
+    """Build the process launcher prefix for a worker script."""
+    if not args.use_torchrun:
+        return [args.python_executable]
+    master_port = args.master_port_base + (run_idx - 1)
+    return [
+        args.python_executable, '-m', 'torch.distributed.run',
+        '--standalone',
+        '--nnodes=1',
+        '--nproc_per_node', str(args.nproc_per_node),
+        '--master_port', str(master_port),
+    ]
+
+
+def build_launch_env(args):
+    env = os.environ.copy()
+    devices = args.devices
+    if devices:
+        env['CUDA_VISIBLE_DEVICES'] = devices
+    if args.use_torchrun and env.get('SMART_SAFE_NCCL', '1') == '1':
+        safe_env = {
+            'TORCH_NCCL_ASYNC_ERROR_HANDLING': '1',
+            'TORCH_NCCL_BLOCKING_WAIT': '1',
+            'NCCL_P2P_DISABLE': '1',
+            'NCCL_IB_DISABLE': '1',
+        }
+        for key, value in safe_env.items():
+            env.setdefault(key, value)
+    return env
+
+
+def run_cmd(cmd, tag, dry_run, env=None):
     ts = datetime.now().strftime('%H:%M:%S')
     print(f'\n{"="*70}')
     print(f'[{ts}] {tag}')
     print(f'CMD: {" ".join(cmd)}')
+    if env is not None and env.get('CUDA_VISIBLE_DEVICES'):
+        print(f'CUDA_VISIBLE_DEVICES={env["CUDA_VISIBLE_DEVICES"]}')
+    if env is not None:
+        env_keys = [
+            'SMART_SAFE_NCCL',
+            'TORCH_NCCL_ASYNC_ERROR_HANDLING',
+            'TORCH_NCCL_BLOCKING_WAIT',
+            'NCCL_P2P_DISABLE',
+            'NCCL_IB_DISABLE',
+        ]
+        applied = [f'{key}={env[key]}' for key in env_keys if key in env]
+        if applied:
+            print('DIST_ENV:', ' '.join(applied))
     print('='*70, flush=True)
     if dry_run:
         print('[DRY RUN] skipped')
         return True
-    result = subprocess.run(cmd, cwd=SMART_DIR)
+    result = subprocess.run(cmd, cwd=SMART_DIR, env=env)
     return result.returncode == 0
+
+
+def los_finetune_flags(dataset):
+    """Use the ROC-style LoS protocol consistently across all model variants."""
+    if dataset != 'mimic_lengthofstay':
+        return []
+    return [
+        '--los-task', 'classification',
+        '--los-label-unit', 'auto',
+        '--los-save-metric', 'auc_micro',
+    ]
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dry-run', action='store_true',
                         help='Print commands without running them')
+    parser.add_argument('--python-executable', type=str,
+                        default=os.environ.get('SMART_PYTHON_EXECUTABLE', sys.executable),
+                        help='Python executable used to launch training workers. '
+                             'Defaults to SMART_PYTHON_EXECUTABLE env or the current interpreter.')
     _extra_models = [
         'smart-smile-nomnar', 'smart-smile-norandom',
         'smart-smile-temporal-only', 'smart-smile-system-only',
@@ -151,6 +217,15 @@ def main():
     parser.add_argument('--finetune-epochs', type=int, default=35)
     parser.add_argument('--batch-size', type=int, default=64,
                         help='Batch size per GPU. Default is 64.')
+    parser.add_argument('--use-torchrun', action='store_true',
+                        help='Launch pretrain/finetune with torchrun for multi-GPU DDP.')
+    parser.add_argument('--nproc-per-node', type=int, default=2,
+                        help='Processes per node when --use-torchrun is enabled.')
+    parser.add_argument('--master-port-base', type=int, default=29500,
+                        help='Base master port for torchrun; each run uses base + run_idx - 1.')
+    parser.add_argument('--devices', type=str,
+                        default=os.environ.get('DEVICES') or os.environ.get('CUDA_VISIBLE_DEVICES'),
+                        help='Visible CUDA devices, e.g. "0,1". Defaults to DEVICES or CUDA_VISIBLE_DEVICES env.')
     parser.add_argument('--pretrain-only', action='store_true',
                         help='Only run pretraining, skip finetuning')
     parser.add_argument('--finetune-only', action='store_true',
@@ -177,6 +252,14 @@ def main():
     print(f'Datasets: {args.datasets}')
     print(f'Seeds:    {args.seeds}')
     print(f'Pretrain epochs: {args.pretrain_epochs}  |  Finetune epochs: {args.finetune_epochs}')
+    print(f'Worker python: {args.python_executable}')
+    if args.devices:
+        print(f'Visible devices: {args.devices}')
+    if args.use_torchrun:
+        print(f'Launch mode: torchrun ({args.nproc_per_node} proc/node), master_port_base={args.master_port_base}')
+    else:
+        print('Launch mode: python (single process)')
+    launch_env = build_launch_env(args)
 
     for idx, (model, dataset, seed) in enumerate(plan, 1):
         use_film_flag          = ['--use-film']          if model == 'smart-film'          else []
@@ -191,7 +274,10 @@ def main():
         use_smile_lean_flag              = ['--use-smile-lean']             if model in ('smart-smile-lean', 'smart-smile-lean-pmae') or _is_lean_v1_ablation else []
         use_smile_lean_samepretrain_flag = ['--use-smile-lean-samepretrain'] if model == 'smart-smile-lean-samepretrain' else []
         pmae_pretrain_flag               = ['--pretrain-mask-mode', 'proportional_var'] if model == 'smart-smile-lean-pmae' else []
-        pmae_pretrain_dir_flag           = ['--pretrain-dir', os.path.join('./export', dataset, model, f'seed_{seed}')] if model == 'smart-smile-lean-pmae' else []
+        pretrain_model = pretrain_source_model(model)
+        pretrain_dir_flag = []
+        if model == 'smart-smile-lean-pmae' or model == 'smart-smile-lean-v2-no-dual-head':
+            pretrain_dir_flag = ['--pretrain-dir', os.path.join('./export', dataset, pretrain_model, f'seed_{seed}')]
         _lean_exclude = {'smart-smile-film', 'smart-smile-v2', 'smart-smile-v2-film',
                          'smart-smile-lean-v2',
                          'smart-smile-lean', 'smart-smile-lean-samepretrain', 'smart-smile-lean-pmae'}
@@ -214,14 +300,18 @@ def main():
         # Architecture ablation flags
         arch_abl_extra = _ABLATION_FLAGS.get(model, [])
         tag_prefix = f'[{idx:>2}/{total}] {model:12s} | {dataset:25s} | seed={seed}'
+        los_ft_flags = los_finetune_flags(dataset)
 
         # ---- Pretrain ----
         # Lean models: batch_size=64, save_best (same setup as smart baseline)
         cur_batch_size = 64 if model in _LEAN_MODELS else args.batch_size
         cur_ft_epochs = 25 if model in _LEAN_MODELS else args.finetune_epochs
         if not args.finetune_only:
-            pre_ckpt = pretrain_ckpt(dataset, model, seed)
-            if not args.force and os.path.exists(pre_ckpt):
+            pre_ckpt = pretrain_ckpt(dataset, pretrain_model, seed)
+            if model == 'smart-smile-lean-v2-no-dual-head':
+                print(f'{tag_prefix} | pretrain: REUSE ({pretrain_model})')
+                skipped_pre += 1
+            elif not args.force and os.path.exists(pre_ckpt):
                 print(f'{tag_prefix} | pretrain: SKIP (exists)')
                 skipped_pre += 1
             else:
@@ -230,14 +320,14 @@ def main():
                 save_last_flag = ([]
                     if dataset in ('mimic_lengthofstay', 'mimic_decompensation') or model in _LEAN_MODELS
                     else ['--save-last'])
-                cmd = [
-                    sys.executable, 'main_pretrain.py',
+                cmd = launch_prefix(args, idx) + [
+                    'main_pretrain.py',
                     '--dataset', dataset,
                     '--seed', str(seed),
                     '--epochs', str(args.pretrain_epochs),
                     '--batch_size', str(cur_batch_size),
                 ] + save_last_flag + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_flag + arch_abl_extra
-                ok = run_cmd(cmd, f'{tag_prefix} | PRETRAIN', args.dry_run)
+                ok = run_cmd(cmd, f'{tag_prefix} | PRETRAIN', args.dry_run, env=launch_env)
                 if not ok:
                     failed.append(f'{tag_prefix} pretrain')
                     print(f'[WARN] pretrain failed, skipping finetune for this experiment')
@@ -250,29 +340,29 @@ def main():
                 print(f'{tag_prefix} | finetune: SKIP (exists)')
                 skipped_ft += 1
                 continue
-            pre_ckpt = pretrain_ckpt(dataset, model, seed)
+            pre_ckpt = pretrain_ckpt(dataset, pretrain_model, seed)
             if not args.dry_run and not os.path.exists(pre_ckpt):
-                print(f'[WARN] pretrain checkpoint missing for {model}/{dataset}/seed_{seed}, skipping finetune')
+                print(f'[WARN] pretrain checkpoint missing for {pretrain_model}/{dataset}/seed_{seed}, skipping finetune')
                 failed.append(f'{tag_prefix} finetune (no pretrain ckpt)')
                 continue
-            cmd = [
-                sys.executable, 'main_finetune.py',
+            cmd = launch_prefix(args, idx) + [
+                'main_finetune.py',
                 '--dataset', dataset,
                 '--seed', str(seed),
                 '--epochs', str(cur_ft_epochs),
                 '--batch_size', str(cur_batch_size),
-            ] + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pmae_pretrain_dir_flag + arch_abl_extra
-            ok = run_cmd(cmd, f'{tag_prefix} | FINETUNE', args.dry_run)
+            ] + los_ft_flags + use_film_flag + use_smile_film_flag + use_smile_v2_film_flag + use_smile_v2_flag + use_smile_lean_v2_flag + use_smile_lean_flag + use_smile_lean_samepretrain_flag + use_smile_flag + use_mnar_flag + smile_extra + pretrain_dir_flag + arch_abl_extra
+            ok = run_cmd(cmd, f'{tag_prefix} | FINETUNE', args.dry_run, env=launch_env)
             if not ok:
                 failed.append(f'{tag_prefix} finetune')
             elif args.visualize:
                 viz_cmd = [
-                    sys.executable, 'visualize.py',
+                    args.python_executable, 'visualize.py',
                     '--dataset', dataset,
                     '--checkpoint', finetune_ckpt(dataset, model, seed),
                     '--seed', str(seed),
                 ] + use_film_flag + use_smile_flag
-                run_cmd(viz_cmd, f'{tag_prefix} | VISUALIZE', args.dry_run)
+                run_cmd(viz_cmd, f'{tag_prefix} | VISUALIZE', args.dry_run, env=launch_env)
 
     print(f'\n{"="*70}')
     print(f'Finished. Total={total}, Skipped pretrain={skipped_pre}, Skipped finetune={skipped_ft}')

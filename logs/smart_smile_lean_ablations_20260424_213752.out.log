@@ -1,0 +1,23 @@
+Total experiments: 72
+Models:   ['smart-smile-lean-no-density', 'smart-smile-lean-no-film', 'smart-smile-lean-no-mnar-bias', 'smart-smile-lean-no-mnar-bias-no-time-mnar', 'smart-smile-lean-no-time-mnar', 'smart-smile-lean-no-time-pe']
+Datasets: ['c12', 'c19', 'mimic_mortality', 'mimic_phenotyping', 'mimic_decompensation', 'mimic_lengthofstay']
+Seeds:    [1, 3407]
+Pretrain epochs: 25  |  Finetune epochs: 35
+Worker python: C:\Users\shaog\AppData\Local\Programs\Python\Python313\python.exe
+Visible devices: 0,1
+Launch mode: torchrun (2 proc/node), master_port_base=29500
+
+======================================================================
+[21:37:53] [ 1/72] smart-smile-lean-no-density | c12                       | seed=1 | PRETRAIN
+CMD: C:\Users\shaog\AppData\Local\Programs\Python\Python313\python.exe -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node 2 --master_port 29500 main_pretrain.py --dataset c12 --seed 1 --epochs 25 --batch_size 64 --use-smile-lean --abl-no-density
+CUDA_VISIBLE_DEVICES=0,1
+DIST_ENV: TORCH_NCCL_ASYNC_ERROR_HANDLING=1 TORCH_NCCL_BLOCKING_WAIT=1 NCCL_P2P_DISABLE=1 NCCL_IB_DISABLE=1
+======================================================================
+[WARN] pretrain failed, skipping finetune for this experiment
+
+======================================================================
+[21:38:02] [ 2/72] smart-smile-lean-no-density | c12                       | seed=3407 | PRETRAIN
+CMD: C:\Users\shaog\AppData\Local\Programs\Python\Python313\python.exe -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node 2 --master_port 29501 main_pretrain.py --dataset c12 --seed 3407 --epochs 25 --batch_size 64 --use-smile-lean --abl-no-density
+CUDA_VISIBLE_DEVICES=0,1
+DIST_ENV: TORCH_NCCL_ASYNC_ERROR_HANDLING=1 TORCH_NCCL_BLOCKING_WAIT=1 NCCL_P2P_DISABLE=1 NCCL_IB_DISABLE=1
+======================================================================

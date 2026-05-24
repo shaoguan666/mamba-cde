@@ -817,7 +817,7 @@ def plot_temporal_curves_by_outcome(mask_3d, labels, feature_names,
                                     max_vars=8):
     """
     Plot observation frequency over time separately for positive and negative
-    patients. Produces a figure with two subplots (Positive / Negative).
+    patients. Produces vertically stacked Positive / Negative panels.
     """
     N, T, V = mask_3d.shape
     y = np.array(labels, dtype=np.float64)
@@ -868,7 +868,7 @@ def plot_temporal_curves_by_outcome(mask_3d, labels, feature_names,
     colors = [cmap(i / max(1, len(selected) - 1)) for i in range(len(selected))]
     time_hours = np.arange(last_t)
 
-    fig, axes = plt.subplots(1, 2, figsize=(20, 5), sharey=True)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7.6), sharex=True, sharey=True)
 
     groups = [
         ("Positive", obs_rate_pos, axes[0]),
@@ -898,7 +898,7 @@ def plot_temporal_curves_by_outcome(mask_3d, labels, feature_names,
                        linewidth=0.8)
             ax.text(h, 1.02, "%dh" % h, ha="center", fontsize=7, color="grey")
 
-    plt.tight_layout()
+    plt.tight_layout(h_pad=0.7)
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
 
@@ -1042,6 +1042,830 @@ def quantify_temporal_volatility(mask_3d, labels, feature_names,
 
     return df
 
+
+# ============================================================
+# Publication-grade integrated MNAR audit dashboard
+# ============================================================
+
+def _short_dataset_name(name):
+    """Compact labels for dense publication figures."""
+    mapping = {
+        "C12_Mortality": "C12",
+        "C19_Sepsis": "C19",
+        "MIMIC3_Mortality": "MIMIC",
+        "MIMIC3_Phenotyping": "MIMIC-Pheno.",
+        "MIMIC3_Decompensation": "MIMIC-Decomp.",
+        "MIMIC3_LengthOfStay": "MIMIC-LOS",
+    }
+    return mapping.get(name, name.replace("_", "\n"))
+
+
+def _dashboard_dataset_name(name):
+    """Compact multi-line labels for the legacy dashboard."""
+    mapping = {
+        "C19_Sepsis": "C19\nSepsis",
+        "C12_Mortality": "C12\nMortality",
+        "MIMIC3_Mortality": "MIMIC-III\nMortality",
+        "MIMIC3_Phenotyping": "MIMIC-III\nPhenotyping",
+        "MIMIC3_Decompensation": "MIMIC-III\nDecomp.",
+        "MIMIC3_LengthOfStay": "MIMIC-III\nLOS",
+    }
+    return mapping.get(name, name.replace("_", "\n"))
+
+
+def _safe_read_csv(path):
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _neg_log10_p(p_value, cap=50.0):
+    """Stable -log10(p) with a cap for underflowed p-values."""
+    try:
+        p = float(p_value)
+    except Exception:
+        return np.nan
+    if np.isnan(p):
+        return np.nan
+    if p <= 0:
+        return cap
+    return min(-np.log10(p), cap)
+
+
+def _format_p_value(p_value):
+    try:
+        p = float(p_value)
+    except Exception:
+        return "n/a"
+    if np.isnan(p):
+        return "n/a"
+    if p <= 0:
+        return "p<1e-300"
+    if p < 1e-4:
+        return "p=%.0e" % p
+    return "p=%.3f" % p
+
+
+def _style_publication_axis(ax):
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#333333")
+    ax.spines["bottom"].set_color("#333333")
+    ax.tick_params(colors="#333333", labelsize=8, width=0.8)
+    ax.grid(axis="x", color="#E8E8E8", linewidth=0.8, zorder=0)
+
+
+def _get_representative_dataset(summary_df, output_dir):
+    """Prefer C19 for feature-rich panels; otherwise use strongest evidence."""
+    if "C19_Sepsis" in set(summary_df["dataset"]):
+        return "C19_Sepsis"
+    ranked = summary_df.sort_values(
+        ["evidence_count", "V", "N"], ascending=[False, False, False]
+    )
+    return str(ranked.iloc[0]["dataset"])
+
+
+def plot_mnar_audit_dashboard(output_dir="analysis/results",
+                              out_prefix="mnar_audit_dashboard"):
+    """
+    Build a single publication-grade dashboard summarizing the five MNAR
+    statistical audits across all processed datasets.
+
+    Inputs are the CSV files already produced by run_analysis:
+      - mnar_summary.csv
+      - <dataset>/t2_outcome.csv
+      - <dataset>/t3_temporal.csv
+      - <dataset>/t4_block.csv
+      - <dataset>/t5_indicator.csv
+
+    Outputs:
+      - <output_dir>/<out_prefix>.png
+      - <output_dir>/<out_prefix>.pdf
+    """
+    summary_path = os.path.join(output_dir, "mnar_summary.csv")
+    summary_df = _safe_read_csv(summary_path)
+    if summary_df.empty:
+        print("  [WARN] Cannot create dashboard: missing %s" % summary_path)
+        return None
+
+    required_cols = ["dataset", "N", "V", "t1_p", "t2_n_significant",
+                     "t3_n_nonstationary", "t4_mean_delta", "t5_mean_auc",
+                     "evidence_count", "mnar_verdict"]
+    missing_cols = [c for c in required_cols if c not in summary_df.columns]
+    if missing_cols:
+        print("  [WARN] Cannot create dashboard: missing columns %s"
+              % ", ".join(missing_cols))
+        return None
+
+    datasets = summary_df["dataset"].astype(str).tolist()
+    rep_ds = _get_representative_dataset(summary_df, output_dir)
+    rep_dir = os.path.join(output_dir, rep_ds)
+
+    # Publication style: clean white canvas, restrained clinical palette.
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+        "font.size": 9,
+        "axes.titlesize": 10,
+        "axes.labelsize": 9,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "savefig.facecolor": "white",
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+    red = "#B2182B"
+    red_mid = "#D6604D"
+    blue = "#2166AC"
+    blue_light = "#67A9CF"
+    dark = "#222222"
+    panel_bg = "#F7F7F7"
+
+    fig = plt.figure(figsize=(18, 11), constrained_layout=False)
+    outer = fig.add_gridspec(
+        nrows=3, ncols=6,
+        height_ratios=[1.20, 1.05, 1.15],
+        width_ratios=[1, 1, 1, 1, 1, 1],
+        left=0.055, right=0.985, top=0.90, bottom=0.075,
+        wspace=0.55, hspace=0.72,
+    )
+
+    fig.text(
+        0.055, 0.965,
+        "MNAR statistical audit across clinical time-series datasets",
+        fontsize=18, fontweight="bold", color=dark, ha="left", va="top",
+    )
+    fig.text(
+        0.055, 0.935,
+        "Five complementary tests reject MCAR and expose outcome-, time-, block-, and covariate-dependent missingness.",
+        fontsize=10, color="#555555", ha="left", va="top",
+    )
+
+    # --------------------------------------------------
+    # A. Evidence matrix
+    # --------------------------------------------------
+    ax_a = fig.add_subplot(outer[0, :])
+    V = summary_df["V"].replace(0, np.nan).astype(float)
+    t1_score = summary_df["t1_p"].apply(lambda p: _neg_log10_p(p, cap=20.0) / 20.0)
+    t2_score = (summary_df["t2_n_significant"].astype(float) / V).clip(0, 1)
+    t3_score = (summary_df["t3_n_nonstationary"].astype(float) / V).clip(0, 1)
+    t4_score = (summary_df["t4_mean_delta"].astype(float) / 0.50).clip(0, 1)
+    t5_score = ((summary_df["t5_mean_auc"].astype(float) - 0.50) / 0.35).clip(0, 1)
+
+    evidence = np.vstack([t1_score, t2_score, t3_score, t4_score, t5_score]).T
+    evidence = np.nan_to_num(evidence, nan=0.0)
+    col_labels = [
+        "T1\nMCAR rejected",
+        "T2\nOutcome link",
+        "T3\nTemporal drift",
+        "T4\nBlock structure",
+        "T5\nPredictability",
+    ]
+    row_labels = [_dashboard_dataset_name(d) for d in datasets]
+
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "mnar_evidence", ["#F2F2F2", "#F4A582", red]
+    )
+    im = ax_a.imshow(evidence, aspect="auto", cmap=cmap, vmin=0, vmax=1)
+    ax_a.set_xticks(np.arange(len(col_labels)))
+    ax_a.set_xticklabels(col_labels, fontsize=9)
+    ax_a.set_yticks(np.arange(len(row_labels)))
+    ax_a.set_yticklabels(row_labels, fontsize=8)
+    ax_a.tick_params(length=0)
+    ax_a.set_title("A. Cross-dataset evidence matrix", loc="left",
+                   fontweight="bold", color=dark, pad=12)
+
+    for i, row in summary_df.iterrows():
+        vals = [
+            _format_p_value(row["t1_p"]),
+            "%d/%d" % (int(row["t2_n_significant"]), int(row["V"])),
+            "%d/%d" % (int(row["t3_n_nonstationary"]), int(row["V"])),
+            "Delta=%.2f" % float(row["t4_mean_delta"]),
+            "AUC=%.2f" % float(row["t5_mean_auc"]),
+        ]
+        for j, txt in enumerate(vals):
+            color = "white" if evidence[i, j] > 0.62 else dark
+            ax_a.text(j, i, txt, ha="center", va="center",
+                      fontsize=8, color=color, fontweight="bold")
+        ax_a.text(
+            len(col_labels) + 0.18, i,
+            "%d/5  %s" % (int(row["evidence_count"]), row["mnar_verdict"]),
+            ha="left", va="center", fontsize=8.5, color=red,
+            fontweight="bold",
+        )
+
+    ax_a.set_xlim(-0.5, len(col_labels) + 2.4)
+    for x in np.arange(-0.5, len(col_labels), 1):
+        ax_a.axvline(x, color="white", linewidth=1.5)
+    for y in np.arange(-0.5, len(row_labels), 1):
+        ax_a.axhline(y, color="white", linewidth=1.5)
+    for spine in ax_a.spines.values():
+        spine.set_visible(False)
+    cbar = fig.colorbar(im, ax=ax_a, fraction=0.018, pad=0.015)
+    cbar.set_label("Evidence strength", fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+
+    # --------------------------------------------------
+    # B. T1: Little's MCAR
+    # --------------------------------------------------
+    ax_b = fig.add_subplot(outer[1, 0:2])
+    y = np.arange(len(summary_df))
+    t1_x = summary_df["t1_p"].apply(lambda p: _neg_log10_p(p, cap=50.0)).values
+    ax_b.scatter(t1_x, y, s=80, color=red, edgecolor="white",
+                 linewidth=1.0, zorder=3)
+    ax_b.axvline(-np.log10(0.05), color="#555555", linestyle="--",
+                 linewidth=1.0)
+    ax_b.set_yticks(y)
+    ax_b.set_yticklabels(row_labels)
+    ax_b.invert_yaxis()
+    ax_b.set_xlim(0, 52)
+    ax_b.set_xlabel("-log10(p), capped at 50")
+    ax_b.set_title("B. T1: Little's MCAR test rejects randomness",
+                   loc="left", fontweight="bold", color=dark)
+    _style_publication_axis(ax_b)
+
+    # --------------------------------------------------
+    # C. T2: outcome-dependent missingness
+    # --------------------------------------------------
+    ax_c = fig.add_subplot(outer[1, 2:4])
+    t2_df = _safe_read_csv(os.path.join(rep_dir, "t2_outcome.csv"))
+    if not t2_df.empty and "diff(pos-neg)" in t2_df.columns:
+        t2_plot = t2_df.copy()
+        t2_plot["abs_diff"] = t2_plot["diff(pos-neg)"].abs()
+        t2_plot = t2_plot.sort_values("abs_diff", ascending=False).head(10)
+        t2_plot = t2_plot.sort_values("diff(pos-neg)")
+        colors = [blue if v < 0 else red for v in t2_plot["diff(pos-neg)"]]
+        ax_c.barh(np.arange(len(t2_plot)), t2_plot["diff(pos-neg)"],
+                  color=colors, alpha=0.92, height=0.68, zorder=3)
+        ax_c.axvline(0, color="#333333", linewidth=0.8)
+        ax_c.set_yticks(np.arange(len(t2_plot)))
+        ax_c.set_yticklabels(t2_plot["feature"], fontsize=8)
+        ax_c.set_xlabel("Missing-rate difference, positive - negative")
+        ax_c.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+    else:
+        ax_c.text(0.5, 0.5, "T2 CSV unavailable", transform=ax_c.transAxes,
+                  ha="center", va="center", color="#777777")
+    ax_c.set_title("C. T2: missingness is outcome-dependent (%s)" % rep_ds,
+                   loc="left", fontweight="bold", color=dark)
+    _style_publication_axis(ax_c)
+
+    # --------------------------------------------------
+    # D. T3: temporal non-stationarity
+    # --------------------------------------------------
+    ax_d = fig.add_subplot(outer[1, 4:6])
+    frac_t3 = summary_df["t3_n_nonstationary"].astype(float) / V
+    bars = ax_d.barh(y, frac_t3.values, color=red_mid, alpha=0.94,
+                     height=0.62, zorder=3)
+    ax_d.axvline(0.30, color="#555555", linestyle="--", linewidth=1.0)
+    ax_d.set_yticks(y)
+    ax_d.set_yticklabels(row_labels)
+    ax_d.invert_yaxis()
+    ax_d.set_xlim(0, 1.02)
+    ax_d.set_xlabel("Non-stationary variables")
+    ax_d.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+    for bar, n_sig, v_count in zip(bars, summary_df["t3_n_nonstationary"], summary_df["V"]):
+        ax_d.text(bar.get_width() + 0.02,
+                  bar.get_y() + bar.get_height() / 2,
+                  "%d/%d" % (int(n_sig), int(v_count)),
+                  va="center", ha="left", fontsize=8, color=dark)
+    ax_d.set_title("D. T3: missingness changes over time",
+                   loc="left", fontweight="bold", color=dark)
+    _style_publication_axis(ax_d)
+
+    # --------------------------------------------------
+    # E. T4: block/system structure
+    # --------------------------------------------------
+    ax_e = fig.add_subplot(outer[2, 0:3])
+    t4_df = _safe_read_csv(os.path.join(rep_dir, "t4_block.csv"))
+    if not t4_df.empty and "delta" in t4_df.columns:
+        t4_plot = t4_df.dropna(subset=["delta"]).sort_values(
+            "delta", ascending=True
+        ).tail(10)
+        ax_e.barh(np.arange(len(t4_plot)), t4_plot["delta"],
+                  color="#7B3294", alpha=0.88, height=0.65, zorder=3)
+        ax_e.axvline(0.05, color="#555555", linestyle="--", linewidth=1.0)
+        ax_e.set_yticks(np.arange(len(t4_plot)))
+        ax_e.set_yticklabels(t4_plot["system"], fontsize=8)
+        ax_e.set_xlabel("Within-system minus cross-system correlation")
+        for i, (_, row) in enumerate(t4_plot.iterrows()):
+            mark = "*" if bool(row.get("significant", False)) else ""
+            ax_e.text(float(row["delta"]) + 0.015, i, mark,
+                      va="center", ha="left", fontsize=12,
+                      color=red, fontweight="bold")
+    else:
+        ax_e.text(0.5, 0.5, "T4 CSV unavailable", transform=ax_e.transAxes,
+                  ha="center", va="center", color="#777777")
+    ax_e.set_title("E. T4: missingness clusters by clinical system (%s)" % rep_ds,
+                   loc="left", fontweight="bold", color=dark)
+    _style_publication_axis(ax_e)
+
+    # --------------------------------------------------
+    # F. T5: missing-indicator predictability
+    # --------------------------------------------------
+    ax_f = fig.add_subplot(outer[2, 3:6])
+    auc_data = []
+    auc_labels = []
+    for ds in datasets:
+        t5_df = _safe_read_csv(os.path.join(output_dir, ds, "t5_indicator.csv"))
+        if t5_df.empty or "auc" not in t5_df.columns:
+            continue
+        vals = t5_df["auc"].dropna().astype(float).values
+        if len(vals) == 0:
+            continue
+        auc_data.append(vals)
+        auc_labels.append(_dashboard_dataset_name(ds))
+
+    if auc_data:
+        positions = np.arange(1, len(auc_data) + 1)
+        vp = ax_f.violinplot(auc_data, positions=positions, widths=0.74,
+                             showmeans=False, showmedians=False,
+                             showextrema=False)
+        for body in vp["bodies"]:
+            body.set_facecolor(blue_light)
+            body.set_edgecolor("#134B73")
+            body.set_alpha(0.55)
+            body.set_linewidth(0.8)
+        for pos, vals in zip(positions, auc_data):
+            jitter = np.linspace(-0.14, 0.14, len(vals)) if len(vals) > 1 else np.array([0.0])
+            ax_f.scatter(np.full(len(vals), pos) + jitter, vals,
+                         s=18, color=blue, alpha=0.65, edgecolor="white",
+                         linewidth=0.3, zorder=3)
+            med = np.median(vals)
+            ax_f.plot([pos - 0.25, pos + 0.25], [med, med],
+                      color=dark, linewidth=1.8, zorder=4)
+        ax_f.axhline(0.60, color=red, linestyle="--", linewidth=1.1)
+        ax_f.text(0.55, 0.612, "AUC=0.60", fontsize=8, color=red)
+        ax_f.set_xticks(positions)
+        ax_f.set_xticklabels(auc_labels, fontsize=8)
+        ax_f.set_ylim(0.45, 0.92)
+        ax_f.set_ylabel("Indicator-prediction AUC")
+    else:
+        ax_f.text(0.5, 0.5, "T5 CSV unavailable", transform=ax_f.transAxes,
+                  ha="center", va="center", color="#777777")
+    ax_f.set_title("F. T5: missingness is predictable from observed covariates",
+                   loc="left", fontweight="bold", color=dark)
+    _style_publication_axis(ax_f)
+
+    # Panel background boxes for a subtle journal-style finish.
+    for ax in [ax_a, ax_b, ax_c, ax_d, ax_e, ax_f]:
+        bbox = ax.get_position()
+        rect = plt.Rectangle(
+            (bbox.x0 - 0.008, bbox.y0 - 0.012),
+            bbox.width + 0.016, bbox.height + 0.030,
+            transform=fig.transFigure, facecolor=panel_bg,
+            edgecolor="#E1E1E1", linewidth=0.8, zorder=-1,
+        )
+        fig.patches.append(rect)
+
+    fig.text(
+        0.055, 0.028,
+        "T1: Little's MCAR test. T2: outcome-stratified missingness. "
+        "T3: Kruskal-Wallis temporal non-stationarity. "
+        "T4: within-system vs cross-system missingness correlation. "
+        "T5: logistic prediction of missing indicators.",
+        fontsize=8, color="#666666", ha="left", va="bottom",
+    )
+
+    png_path = os.path.join(output_dir, out_prefix + ".png")
+    pdf_path = os.path.join(output_dir, out_prefix + ".pdf")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+    return png_path, pdf_path
+
+
+FIGURE2_DATASET_ORDER = [
+    "C12_Mortality",
+    "C19_Sepsis",
+    "MIMIC3_Mortality",
+]
+
+FIGURE2_DATASET_CONFIG = {
+    "C12_Mortality": {
+        "pkl_path": "./data/Challenge2012/data_normalized.pkl",
+        "features": C12_FEATURES,
+        "systems": C12_SYSTEMS,
+        "max_t": 48,
+    },
+    "C19_Sepsis": {
+        "pkl_path": "./data/Challenge2019/data_normalized.pkl",
+        "features": C19_FEATURES,
+        "systems": C19_SYSTEMS,
+        "max_t": 60,
+    },
+    "MIMIC3_Mortality": {
+        "pkl_path": "./data/MIMIC-III/mortality_normalized.pkl",
+        "features": MIMIC_FEATURES,
+        "systems": MIMIC_SYSTEMS,
+        "max_t": 48,
+    },
+}
+
+FIGURE2_SYSTEM_COLORS = [
+    "#92B1D9",
+    "#C1D8E9",
+    "#DBDDEF",
+    "#F6C8B6",
+    "#B9D8C2",
+    "#D4D4D4",
+    "#E9D7B8",
+    "#B7CCD4",
+    "#D6C6E1",
+    "#C8D6A8",
+]
+
+
+def _default_paper_figure_dir():
+    """Find smile-paper/figures from common SMART or repo-root launch dirs."""
+    candidates = [
+        os.path.abspath(os.path.join(os.getcwd(), "..", "smile-paper", "figures")),
+        os.path.abspath(os.path.join(os.getcwd(), "smile-paper", "figures")),
+    ]
+    for candidate in candidates:
+        paper_root = os.path.dirname(candidate)
+        if os.path.isdir(paper_root):
+            return candidate
+    return None
+
+
+def _trim_white_border(img, tol=0.985, pad=6):
+    """Remove blank border from a rendered panel image."""
+    arr = np.asarray(img)
+    rgb = arr[..., :3] if arr.ndim == 3 else arr
+    if rgb.dtype.kind in ("u", "i"):
+        rgb = rgb.astype(np.float32) / 255.0
+    nonwhite = np.any(rgb < tol, axis=-1) if rgb.ndim == 3 else (rgb < tol)
+    rows = np.where(nonwhite.any(axis=1))[0]
+    cols = np.where(nonwhite.any(axis=0))[0]
+    if len(rows) == 0 or len(cols) == 0:
+        return img
+    y0 = max(int(rows[0]) - pad, 0)
+    y1 = min(int(rows[-1]) + pad + 1, arr.shape[0])
+    x0 = max(int(cols[0]) - pad, 0)
+    x1 = min(int(cols[-1]) + pad + 1, arr.shape[1])
+    return arr[y0:y1, x0:x1]
+
+
+def _split_outcome_curve_panels(curves_img):
+    """Split a by-outcome curve image into Positive and Negative panels."""
+    height, width = curves_img.shape[:2]
+    if width / float(max(height, 1)) > 2.0:
+        split = width // 2
+        pos_img = curves_img[:, :split]
+        neg_img = curves_img[:, split:]
+    else:
+        split = height // 2
+        pos_img = curves_img[:split, :]
+        neg_img = curves_img[split:, :]
+    return (
+        _trim_white_border(pos_img, pad=4),
+        _trim_white_border(neg_img, pad=4),
+    )
+
+
+def _flatten_binary_labels(y_list):
+    """Flatten labels and median-split non-binary targets for exemplar selection."""
+    labels = []
+    for y in y_list:
+        arr = np.asarray(y).ravel()
+        labels.append(float(arr[0]) if arr.size else 0.0)
+    labels = np.asarray(labels, dtype=np.float64)
+    if len(np.unique(labels)) > 2:
+        labels = (labels > np.median(labels)).astype(float)
+    return labels.astype(int)
+
+
+def _patient_mask_stats(mask_list, labels, max_t):
+    """Compute compact temporal-mask statistics for selecting exemplars."""
+    rows = []
+    for idx, mask in enumerate(mask_list):
+        m = np.asarray(mask, dtype=np.float32)
+        if m.ndim != 2 or m.shape[0] < 24:
+            continue
+        m_view = m[: min(max_t, m.shape[0])]
+        observed_fraction = np.nanmean(m_view, axis=1)
+        early_n = min(6, len(observed_fraction))
+        late_n = min(6, len(observed_fraction))
+        early = float(np.nanmean(observed_fraction[:early_n]))
+        late = float(np.nanmean(observed_fraction[-late_n:]))
+        overall = float(np.nanmean(m_view))
+        rows.append({
+            "idx": idx,
+            "label": int(labels[idx]),
+            "length": int(m.shape[0]),
+            "overall": overall,
+            "early": early,
+            "late": late,
+            "range": float(np.nanmax(observed_fraction) -
+                           np.nanmin(observed_fraction)),
+            "shift": abs(early - late),
+        })
+    return rows
+
+
+def _choose_patient_exemplar(rows, label):
+    """
+    Pick a readable non-degenerate exemplar with strong temporal mask structure.
+
+    This is deterministic and avoids all-empty/all-dense corner cases, so the
+    figure remains reproducible while still showing within-record heterogeneity.
+    """
+    candidates = [
+        r for r in rows
+        if r["label"] == label
+        and 0.03 <= r["overall"] <= 0.75
+        and r["length"] >= 24
+    ]
+    if not candidates:
+        candidates = [
+            r for r in rows
+            if r["label"] == label and r["length"] >= 24
+        ]
+    if not candidates:
+        return None
+
+    return max(
+        candidates,
+        key=lambda r: (
+            (r["shift"] + 0.4 * r["range"])
+            * (0.25 + min(r["overall"], 0.5))
+        ),
+    )
+
+
+def _build_patient_panel_order(feature_names, system_groups):
+    """Order variables by physiological group and return group boundaries."""
+    V = len(feature_names)
+    used = set()
+    ordered_idx = []
+    group_boundaries = []
+    for sys_name, var_ids in system_groups.items():
+        ids = [v for v in var_ids if v < V and v not in used]
+        if not ids:
+            continue
+        start = len(ordered_idx)
+        ordered_idx.extend(ids)
+        used.update(ids)
+        group_boundaries.append((start, len(ordered_idx), sys_name))
+
+    remaining = [v for v in range(V) if v not in used]
+    if remaining:
+        start = len(ordered_idx)
+        ordered_idx.extend(remaining)
+        group_boundaries.append((start, len(ordered_idx), "Other"))
+    return ordered_idx, group_boundaries
+
+
+def _draw_patient_mask_panel(fig, outer_spec, mask, ordered_idx,
+                             group_boundaries, max_t, show_ylabel=False):
+    """Draw one patient-level mask panel with a top observed-fraction trace."""
+    sub_gs = outer_spec.subgridspec(
+        nrows=2,
+        ncols=1,
+        height_ratios=[0.28, 1.0],
+        hspace=0.03,
+    )
+    ax_trace = fig.add_subplot(sub_gs[0])
+    ax_mask = fig.add_subplot(sub_gs[1], sharex=ax_trace)
+
+    m = np.asarray(mask, dtype=np.float32)
+    last_t = min(max_t, m.shape[0])
+    m = m[:last_t]
+    m_ordered = m[:, ordered_idx].T
+    observed_fraction = np.nanmean(m, axis=1)
+    time = np.arange(last_t)
+
+    ax_trace.plot(time, observed_fraction, color="#B85B50", lw=1.0)
+    ax_trace.fill_between(time, 0, observed_fraction, color="#F6C8B6",
+                          alpha=0.36, lw=0)
+    ax_trace.set_ylim(0, 1.0)
+    ax_trace.set_yticks([0, 1])
+    ax_trace.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+    ax_trace.tick_params(axis="x", labelbottom=False, length=0)
+    ax_trace.tick_params(axis="y", labelsize=5.5, pad=1)
+    ax_trace.grid(axis="y", color="#E5E7EB", lw=0.4)
+    for spine in ax_trace.spines.values():
+        spine.set_visible(False)
+
+    cmap = mcolors.ListedColormap(["#F4F7FA", "#2F5F98"])
+    ax_mask.imshow(m_ordered, aspect="auto", interpolation="nearest",
+                   cmap=cmap, vmin=0, vmax=1)
+    ax_mask.set_xlim(-0.5, max_t - 0.5)
+    xticks = [x for x in [0, 12, 24, 36, 48, 60] if x <= max_t]
+    ax_mask.set_xticks(xticks)
+    ax_mask.set_xticklabels(xticks, fontsize=5.8)
+    ax_mask.set_yticks([])
+    ax_mask.tick_params(axis="x", length=2, pad=1)
+
+    for hour in range(24, max_t + 1, 24):
+        ax_trace.axvline(hour - 0.5, color="#9CA3AF", ls="--",
+                         lw=0.6, alpha=0.75)
+        ax_mask.axvline(hour - 0.5, color="#9CA3AF", ls="--",
+                        lw=0.6, alpha=0.75)
+
+    for start, end, _sys_name in group_boundaries:
+        ax_mask.axhline(start - 0.5, color="white", lw=0.65)
+        ax_mask.axhline(end - 0.5, color="white", lw=0.65)
+
+    strip_x = -2.05
+    for k, (start, end, _sys_name) in enumerate(group_boundaries):
+        rect = plt.Rectangle(
+            (strip_x, start - 0.5),
+            0.55,
+            end - start,
+            facecolor=FIGURE2_SYSTEM_COLORS[k % len(FIGURE2_SYSTEM_COLORS)],
+            edgecolor="none",
+            clip_on=False,
+        )
+        ax_mask.add_patch(rect)
+
+    if show_ylabel:
+        ax_mask.set_ylabel("Grouped\nvariables", fontsize=5.8)
+
+    for spine in ax_mask.spines.values():
+        spine.set_linewidth(0.65)
+        spine.set_color("#344054")
+
+    return ax_trace, ax_mask
+
+
+def _load_patient_mask_panels(dataset):
+    """Load positive/negative patient-mask exemplars for a Figure 2 dataset."""
+    cfg = FIGURE2_DATASET_CONFIG[dataset]
+    x_list, y_list, mask_list = load_pickle_data(cfg["pkl_path"])
+    labels = _flatten_binary_labels(y_list)
+    feature_names = cfg["features"][:np.asarray(mask_list[0]).shape[1]]
+    ordered_idx, group_boundaries = _build_patient_panel_order(
+        feature_names,
+        cfg["systems"],
+    )
+    stats_rows = _patient_mask_stats(mask_list, labels, cfg["max_t"])
+    panels = {}
+    for label in (1, 0):
+        exemplar = _choose_patient_exemplar(stats_rows, label)
+        if exemplar is None:
+            raise ValueError("No exemplar found for %s label=%d" %
+                             (dataset, label))
+        panels[label] = {
+            "record": exemplar,
+            "mask": mask_list[exemplar["idx"]],
+            "ordered_idx": ordered_idx,
+            "group_boundaries": group_boundaries,
+            "max_t": cfg["max_t"],
+        }
+    return panels
+
+
+def plot_mnar_cooccurrence_temporal_grid(
+    output_dir="analysis/results",
+    out_prefix="figure2_mnar_audit_summary",
+    paper_figure_dir=None,
+):
+    """
+    Build the paper Figure 2 from co-missingness heatmaps and patient masks.
+
+    Top row: three t4_cooccurrence_heatmap.png panels in a single row.
+    Rows 2-3: positive/negative patient-level observation masks selected
+    deterministically from the raw SMART pickle files. MIMIC uses the
+    mortality task and is labeled simply MIMIC.
+
+    Outputs:
+      - <output_dir>/<out_prefix>.png
+      - <output_dir>/<out_prefix>.pdf
+      - <paper_figure_dir>/<out_prefix>.png/.pdf, when smile-paper exists
+    """
+    entries = []
+    missing = []
+    for dataset in FIGURE2_DATASET_ORDER:
+        ds_dir = os.path.join(output_dir, dataset)
+        heatmap_path = os.path.join(ds_dir, "t4_cooccurrence_heatmap.png")
+        cfg = FIGURE2_DATASET_CONFIG.get(dataset)
+        pkl_path = cfg["pkl_path"] if cfg is not None else None
+        if (os.path.exists(heatmap_path)
+                and pkl_path is not None
+                and os.path.exists(pkl_path)):
+            entries.append((dataset, heatmap_path))
+        else:
+            if not os.path.exists(heatmap_path):
+                missing.append(heatmap_path)
+            if pkl_path is None or not os.path.exists(pkl_path):
+                missing.append(pkl_path or ("%s pickle config" % dataset))
+
+    if not entries:
+        print("  [WARN] Cannot create Figure 2 grid: no T4 heatmaps/pickle data found.")
+        return None
+    if missing:
+        print("  [WARN] Figure 2 grid missing %d panel image(s); using available datasets."
+              % len(missing))
+        for path in missing[:8]:
+            print("         missing: %s" % path)
+        if len(missing) > 8:
+            print("         ...")
+
+    n_cols = len(entries)
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+        "figure.facecolor": "white",
+        "savefig.facecolor": "white",
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+    fig = plt.figure(figsize=(max(11.0, n_cols * 3.65), 6.95),
+                     constrained_layout=False)
+    gs = fig.add_gridspec(
+        nrows=3, ncols=n_cols,
+        height_ratios=[1.08, 0.72, 0.72],
+        left=0.018, right=0.992, top=0.985, bottom=0.062,
+        wspace=0.05, hspace=0.16,
+    )
+
+    selected_records = []
+    for col, (dataset, heatmap_path) in enumerate(entries):
+        ax_top = fig.add_subplot(gs[0, col])
+
+        heatmap_img = _trim_white_border(plt.imread(heatmap_path), pad=10)
+        patient_panels = _load_patient_mask_panels(dataset)
+
+        ax_top.imshow(heatmap_img)
+        ax_top.set_anchor("S")
+        ax_top.set_title(_short_dataset_name(dataset), fontsize=11,
+                         fontweight="bold", pad=2)
+        ax_top.set_axis_off()
+
+        for row, label in enumerate((1, 0), start=1):
+            panel = patient_panels[label]
+            ax_trace, _ax_mask = _draw_patient_mask_panel(
+                fig,
+                gs[row, col],
+                panel["mask"],
+                panel["ordered_idx"],
+                panel["group_boundaries"],
+                panel["max_t"],
+                show_ylabel=False,
+            )
+            rec = panel["record"]
+            selected_records.append((dataset, label, rec))
+            panel_letter = chr(ord("A") + (row - 1) * n_cols + col)
+            ax_trace.set_title(
+                "%s. Record %d, y=%d" % (panel_letter, rec["idx"], label),
+                loc="left",
+                pad=1.0,
+                fontsize=7.2,
+                fontweight="bold",
+            )
+
+    fig.text(0.50, 0.022, "Time step (hours since admission)",
+             ha="center", fontsize=8)
+    legend_handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor="#2F5F98",
+                      edgecolor="none", label="Observed"),
+        plt.Rectangle((0, 0), 1, 1, facecolor="#F4F7FA",
+                      edgecolor="#D0D5DD", label="Missing"),
+        plt.Rectangle((0, 0), 1, 1, facecolor="#F6C8B6",
+                      edgecolor="#B85B50",
+                      label="Observed feature fraction"),
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="lower right",
+        bbox_to_anchor=(0.992, 0.018),
+        ncol=3,
+        frameon=False,
+        fontsize=6.4,
+        handlelength=1.0,
+        columnspacing=0.8,
+    )
+
+    output_paths = []
+    os.makedirs(output_dir, exist_ok=True)
+    for ext in (".png", ".pdf"):
+        path = os.path.join(output_dir, out_prefix + ext)
+        fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0.04)
+        output_paths.append(path)
+
+    if paper_figure_dir is None:
+        paper_figure_dir = _default_paper_figure_dir()
+    if paper_figure_dir is not None:
+        os.makedirs(paper_figure_dir, exist_ok=True)
+        for ext in (".png", ".pdf"):
+            path = os.path.join(paper_figure_dir, out_prefix + ext)
+            fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0.04)
+            output_paths.append(path)
+
+    plt.close(fig)
+    for dataset, label, rec in selected_records:
+        print("  Figure 2 exemplar: %s y=%d record=%d "
+              "overall=%.3f early=%.3f late=%.3f range=%.3f" %
+              (dataset, label, rec["idx"], rec["overall"], rec["early"],
+               rec["late"], rec["range"]))
+    return tuple(output_paths)
 
 # ============================================================
 # Per-dataset analysis runner
@@ -1334,6 +2158,18 @@ def main():
         print("=" * 60)
         print(summary_df.to_string(index=False))
         print("\nSaved to: %s" % summary_path)
+
+        if not args.no_plot:
+            dashboard_paths = plot_mnar_audit_dashboard(args.output_dir)
+            if dashboard_paths is not None:
+                print("Dashboard saved to:")
+                print("  %s" % dashboard_paths[0])
+                print("  %s" % dashboard_paths[1])
+            figure2_paths = plot_mnar_cooccurrence_temporal_grid(args.output_dir)
+            if figure2_paths is not None:
+                print("Figure 2 replacement saved to:")
+                for path in figure2_paths:
+                    print("  %s" % path)
     else:
         print("\nNo datasets processed. Check pickle file paths.")
         print("Expected paths (relative to SMART/):")

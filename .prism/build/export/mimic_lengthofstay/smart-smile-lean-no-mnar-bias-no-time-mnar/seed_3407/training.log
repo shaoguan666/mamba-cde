@@ -1,0 +1,71 @@
+2026-04-15 18:18:56,754 {
+    "dataset": "mimic_lengthofstay",
+    "data_dropout": 0.0,
+    "epochs": 25,
+    "lr": 0.001,
+    "d_model": 32,
+    "seed": 3407,
+    "batch_size": 64,
+    "dropout": 0.1,
+    "save_model": true,
+    "save_dir": "./export/mimic_lengthofstay/smart-smile-lean-no-mnar-bias-no-time-mnar/seed_3407",
+    "local_rank": 0,
+    "min_mask_ratio": 0.15,
+    "max_mask_ratio": 0.75,
+    "e_layers": 2,
+    "n_heads": 4,
+    "time_dim": 16,
+    "use_film": false,
+    "use_smile": false,
+    "use_smile_film": false,
+    "use_smile_v2": false,
+    "use_smile_v2_film": false,
+    "use_smile_lean": true,
+    "use_smile_lean_samepretrain": false,
+    "use_mnar": false,
+    "save_last": true,
+    "smile_no_mnar": false,
+    "smile_no_curriculum": false,
+    "smile_mask_type": "all",
+    "smile_mnar_dropout": 0.05,
+    "obs_density_window": 5,
+    "abl_no_density": false,
+    "abl_no_mnar_bias": true,
+    "abl_no_film": false,
+    "abl_no_time_mnar": true,
+    "abl_no_time_pe": false,
+    "pretrain_mask_mode": "fixed",
+    "ratio_temperature": 1.0,
+    "smile_stratified": false,
+    "smile_mask_weights": null
+}
+2026-04-15 18:19:09,131 Dataset Loaded.
+2026-04-15 18:19:09,131 system_groups: {'Vital_BP': 3, 'Vital_Basic': 5, 'GCS': 4, 'Anthropo': 2}
+2026-04-15 18:21:18,468 Epoch 1: Train Loss 0.1387, Valid Loss 0.1301, EMA Val 0.1301
+2026-04-15 18:23:26,665 Epoch 2: Train Loss 0.1949, Valid Loss 0.1300, EMA Val 0.1301
+2026-04-15 18:25:27,863 Epoch 3: Train Loss 0.2061, Valid Loss 0.1323, EMA Val 0.1307
+2026-04-15 18:27:42,525 Epoch 4: Train Loss 0.2247, Valid Loss 0.1386, EMA Val 0.1331
+2026-04-15 18:29:53,564 Epoch 5: Train Loss 0.2474, Valid Loss 0.1531, EMA Val 0.1391
+2026-04-15 18:32:05,538 Epoch 6: Train Loss 0.2670, Valid Loss 0.1586, EMA Val 0.1449
+2026-04-15 18:34:16,067 Epoch 7: Train Loss 0.2897, Valid Loss 0.1733, EMA Val 0.1534
+2026-04-15 18:36:23,583 Epoch 8: Train Loss 0.3129, Valid Loss 0.1816, EMA Val 0.1619
+2026-04-15 18:38:34,381 Epoch 9: Train Loss 0.3168, Valid Loss 0.1750, EMA Val 0.1658
+2026-04-15 18:40:47,643 Epoch 10: Train Loss 0.3285, Valid Loss 0.1823, EMA Val 0.1708
+2026-04-15 18:43:02,629 Epoch 11: Train Loss 0.3470, Valid Loss 0.1963, EMA Val 0.1784
+2026-04-15 18:45:17,254 Epoch 12: Train Loss 0.3619, Valid Loss 0.2003, EMA Val 0.1850
+2026-04-15 18:47:26,578 Epoch 13: Train Loss 0.3744, Valid Loss 0.2009, EMA Val 0.1898
+2026-04-15 18:49:40,690 Epoch 14: Train Loss 0.3767, Valid Loss 0.2018, EMA Val 0.1934
+2026-04-15 18:51:52,579 Epoch 15: Train Loss 0.3860, Valid Loss 0.2048, EMA Val 0.1968
+2026-04-15 18:54:00,373 Epoch 16: Train Loss 0.3979, Valid Loss 0.2299, EMA Val 0.2067
+2026-04-15 18:56:11,753 Epoch 17: Train Loss 0.3980, Valid Loss 0.2079, EMA Val 0.2071
+2026-04-15 18:58:28,062 Epoch 18: Train Loss 0.3993, Valid Loss 0.2075, EMA Val 0.2072
+2026-04-15 19:00:43,821 Epoch 19: Train Loss 0.3998, Valid Loss 0.2159, EMA Val 0.2098
+2026-04-15 19:02:57,511 Epoch 20: Train Loss 0.4036, Valid Loss 0.2200, EMA Val 0.2129
+2026-04-15 19:05:07,883 Epoch 21: Train Loss 0.4070, Valid Loss 0.2172, EMA Val 0.2142
+2026-04-15 19:07:17,401 Epoch 22: Train Loss 0.4056, Valid Loss 0.2168, EMA Val 0.2150
+2026-04-15 19:09:21,392 Epoch 23: Train Loss 0.4033, Valid Loss 0.2156, EMA Val 0.2152
+2026-04-15 19:11:31,121 Epoch 24: Train Loss 0.4113, Valid Loss 0.2138, EMA Val 0.2148
+2026-04-15 19:13:42,644 Epoch 25: Train Loss 0.4094, Valid Loss 0.2188, EMA Val 0.2160
+2026-04-15 19:13:42,645 ----- Save last epoch model - L1: 0.2160 -----
+2026-04-15 19:13:42,678 last saved model is in epoch 25
+2026-04-15 19:13:48,185 Test Loss 0.2203

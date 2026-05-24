@@ -1,0 +1,45 @@
+{
+  "seeds": [1, 42, 3407],
+  "datasets": [
+    "c12",
+    "c19",
+    "mimic_mortality",
+    "mimic_decompensation",
+    "mimic_phenotyping",
+    "mimic_lengthofstay"
+  ],
+  "implemented_variants": {
+    "Backbone": "smart",
+    "SMILE-Full": "smart-smile-lean",
+    "SMILE-Full-v2": "smart-smile-lean-v2",
+    "SMILE w/o Density": "smart-smile-lean-no-density",
+    "SMILE w/o CoMiss": "smart-smile-lean-no-mnar-bias",
+    "SMILE w/o TimeMod": "smart-smile-lean-no-film",
+    "SMILE w/o T-MNAR": "smart-smile-lean-no-time-mnar",
+    "SMILE w/o T-PE": "smart-smile-lean-no-time-pe",
+    "SMILE w/o All-MNAR": "smart-smile-lean-no-mnar-bias-no-time-mnar",
+    "SMILE w/o Curriculum": "smart-smile-lean-samepretrain",
+    "Global-CoMiss Control": "smart-smile-lean-v2-no-dynamic-mnar"
+  },
+  "pending_variants": {
+    "Capacity-Control": {
+      "status": "not_implemented",
+      "required_code": "Add a parameter-matched adapter or MLP path that does not consume density, co-missingness, or temporal missingness signals."
+    },
+    "Random-Bias Control": {
+      "status": "not_implemented",
+      "required_code": "Add an attention-bias path with the same tensor shape as co-missingness bias but generated independently of the sample mask."
+    }
+  },
+  "runner_defaults": {
+    "pretrain_epochs": 25,
+    "finetune_epochs": 25,
+    "batch_size": 64,
+    "lr": 0.001,
+    "optimizer": "Adam",
+    "scheduler": "CosineAnnealingLR",
+    "selection_binary": "validation AUPRC",
+    "selection_phenotyping": "validation macro-AUROC",
+    "selection_lengthofstay": "configured AUROC protocol"
+  }
+}

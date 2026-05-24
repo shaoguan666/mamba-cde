@@ -40,6 +40,7 @@ def print_metrics_multilabel(y_true, predictions, verbose=True):
         logging.info("auc_weighted = {:.4f}".format(ave_auc_weighted))
 
     return {"auc_scores": auc_scores,
+            "auc_micro": ave_auc_micro,
             "auroc": ave_auc_micro,
             "auc_macro": ave_auc_macro,
             "auc_weighted": ave_auc_weighted}

@@ -1,0 +1,75 @@
+DG6111742_x64/
+nul
+*.sh
+*.whl
+
+# ===== 数据文件 =====
+# NumPy
+*.npy
+*.npz
+
+# CSV / TSV
+*.csv
+*.tsv
+
+# HDF5
+*.h5
+*.hdf5
+
+# Pickle
+*.pkl
+*.pickle
+
+# PyTorch checkpoints
+*.pt
+*.pth
+*.ckpt
+
+# Parquet / Feather / Arrow
+*.parquet
+*.feather
+*.arrow
+
+# 压缩数据包
+*.tar.gz
+*.tar.bz2
+*.zip
+*.gz
+*.bz2
+*.7z
+
+# ===== 实验结果目录 =====
+NeuralCDE-master/experiments/results/
+NeuralCDE-master/experiments/datasets/data/
+NeuralCDE-master/experiments/paper_figures/
+NeuralCDE-master/experiments/paper_figures_test/
+
+# ===== 生成图片 =====
+NeuralCDE-master/experiments/*.pdf
+NeuralCDE-master/experiments/*.png
+NeuralCDE-master/experiments/*.jpg
+NeuralCDE-master/experiments/*.svg
+
+# ===== 大型外部目录 =====
+SMART-original/
+mimic3-benchmarks/
+mode-mamba-ts/
+physionet.org/
+raw/
+
+# ===== SMART 子目录排除 =====
+SMART/data/
+SMART/figs/
+SMART/analysis/results/
+__pycache__/
+
+# ===== OMC 工具缓存 =====
+.omc/
+
+# ===== 生成的调试/文本文件 =====
+SMART_DEBUG_REPORT.md
+SMART_text.txt
+
+# ===== 数据结果文件 =====
+Outcomes-*.txt
+*.pdf

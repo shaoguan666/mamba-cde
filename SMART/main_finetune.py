@@ -4,6 +4,8 @@ import os
 import logging
 import torch
 import torch.distributed as dist
+import numpy as np
+from sklearn import metrics as sk_metrics
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, DistributedSampler, RandomSampler, SequentialSampler
 from tqdm import tqdm
@@ -14,7 +16,13 @@ from data.mimiciii import load_mimic_iii_mortality, load_mimic_iii_phenotyping, 
 from data.dataloader import collate_fn
 from models.smart import Classifier
 from utils.metrics import print_metrics_binary, print_metrics_multilabel, print_metrics_regression
-from utils.utils import set_seed, distributed_init, init_logging
+from utils.utils import (
+    set_seed,
+    distributed_init,
+    init_logging,
+    configure_torch_runtime,
+    build_dataloader_kwargs,
+)
 from utils.variable_order import get_variable_order
 
 
@@ -40,7 +48,61 @@ def apply_mnar_dropout(original_mask, dropout_rate=0.05):
     return original_mask * (~drop)
 
 
-def test(args, checkpoint_path, test_dataloader):
+def _collect_predictions(args, dataloader):
+    preds_all = []
+    labels_all = []
+    loss_total = 0
+    with torch.no_grad():
+        for batch in dataloader:
+            for key in batch:
+                batch[key] = batch[key].cuda()
+            if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
+                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
+                    or args.use_smile_lean_v2):
+                policy_mask_clean = batch['mask'].clone()
+            else:
+                policy_mask_clean = None
+            h = encoder(**batch, original_mask=policy_mask_clean)
+            preds = classifier(h, original_mask=policy_mask_clean, **batch)
+            loss_total += criterion(preds, batch['labels']).item() * batch['x'].shape[0]
+            preds_all.append(preds.cpu())
+            labels_all.append(batch['labels'].cpu())
+    return torch.cat(labels_all), torch.cat(preds_all), loss_total
+
+
+def _best_f1_threshold(y_true, probs):
+    precisions, recalls, thresholds = sk_metrics.precision_recall_curve(y_true, probs)
+    if len(thresholds) == 0:
+        return 0.5, 0.0
+    denom = precisions[:-1] + recalls[:-1]
+    f1s = np.where(denom > 0, 2 * precisions[:-1] * recalls[:-1] / denom, 0.0)
+    idx = int(np.argmax(f1s))
+    return float(thresholds[idx]), float(f1s[idx])
+
+
+def _binary_metrics_at_threshold(y_true, preds, threshold):
+    probs = np.asarray(preds)[:, 1]
+    y = np.asarray(y_true)
+    y_hat = (probs >= threshold).astype(int)
+    precision = sk_metrics.precision_score(y, y_hat, zero_division=0)
+    recall = sk_metrics.recall_score(y, y_hat, zero_division=0)
+    f1 = sk_metrics.f1_score(y, y_hat, zero_division=0)
+    auroc = sk_metrics.roc_auc_score(y, probs)
+    precision_curve, recall_curve, _ = sk_metrics.precision_recall_curve(y, probs)
+    auprc = sk_metrics.auc(recall_curve, precision_curve)
+    minpse = np.max([min(p, r) for p, r in zip(precision_curve, recall_curve)])
+    return {
+        "auroc": float(auroc),
+        "auprc": float(auprc),
+        "minpse": float(minpse),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "threshold": float(threshold),
+    }
+
+
+def test(args, checkpoint_path, test_dataloader, val_dataloader=None):
     checkpoint = torch.load(os.path.join(args.save_dir, checkpoint_path), weights_only=False)
     save_epoch = checkpoint['epoch']
     log(logger, "last saved model is in epoch {}".format(save_epoch))
@@ -48,25 +110,26 @@ def test(args, checkpoint_path, test_dataloader):
     classifier.load_state_dict(checkpoint['classifier'])
     encoder.eval()
     classifier.eval()
-    test_loss = 0
-    preds_all = []
-    labels_all = []
-    with torch.no_grad():
-        for batch in test_dataloader:
-            for key in batch:
-                batch[key] = batch[key].cuda()
-            if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
-                    or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
-                    or args.use_smile_lean_v2):
-                policy_mask_clean = batch['mask'].clone()  # no dropout: test uses clean mask
-            else:
-                policy_mask_clean = None
-            h = encoder(**batch, original_mask=policy_mask_clean)
-            preds = classifier(h, original_mask=policy_mask_clean, **batch)
-            test_loss += criterion(preds, batch['labels']).item() * batch['x'].shape[0]
-            preds_all.append(preds.cpu())
-            labels_all.append(batch['labels'].cpu())
-    print_metrics(torch.cat(labels_all), torch.cat(preds_all), args.local_rank == 0)
+    labels_all, preds_all, test_loss = _collect_predictions(args, test_dataloader)
+    test_metrics = print_metrics(labels_all, preds_all, args.local_rank == 0)
+    threshold_metrics = None
+    if args.num_class == 2 and val_dataloader is not None:
+        val_labels, val_preds, _ = _collect_predictions(args, val_dataloader)
+        val_probs = np.asarray(val_preds)[:, 1]
+        threshold, val_f1 = _best_f1_threshold(np.asarray(val_labels), val_probs)
+        threshold_metrics = _binary_metrics_at_threshold(labels_all, preds_all, threshold)
+        log(logger, "Validation-selected threshold = {:.4f}".format(threshold))
+        log(logger, "Val best F1 = {:.4f}".format(val_f1))
+        log(logger, "f1_score_val_threshold = {:.4f}".format(threshold_metrics["f1"]))
+    if args.local_rank == 0:
+        result_path = os.path.join(args.save_dir, "eval_results.json")
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "checkpoint": checkpoint_path,
+                "checkpoint_epoch": int(save_epoch),
+                "test_metrics": {k: float(v) for k, v in test_metrics.items() if not hasattr(v, "__len__")},
+                "validation_threshold_metrics": threshold_metrics,
+            }, f, indent=2)
     log(logger, 'Test Loss %.4f' % (test_loss / len(test_dataset)))
 
 
@@ -86,6 +149,8 @@ if __name__ == "__main__":
     parser.add_argument('--d_model', type=int, default=32)
     parser.add_argument('--seed', type=int, default=3407)
     parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--num-workers', type=int, default=None,
+                        help='DataLoader workers per process. Defaults to a conservative auto setting.')
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--save_model', type=bool, default=True)
     parser.add_argument('--save_dir', type=str, default='./export/')
@@ -145,6 +210,15 @@ if __name__ == "__main__":
                              'When 0 (default), uses constant smile-mnar-dropout instead.')
     parser.add_argument('--smile-stratified', action='store_true', default=False,
                         help='Use pretrained model from stratified masking (Scheme F+D).')
+    parser.add_argument('--los-task', choices=['classification', 'regression'], default='classification',
+                        help='Length-of-stay protocol: classification matches ROC-style reporting; '
+                             'regression matches SMART-original open-source code.')
+    parser.add_argument('--los-label-unit', choices=['auto', 'hours', 'days'], default='auto',
+                        help='Interpretation of raw LoS labels in lengthofstay_normalized.pkl.')
+    parser.add_argument('--los-use-class-weights', action='store_true', default=False,
+                        help='Use inverse-frequency class weights for LoS classification.')
+    parser.add_argument('--los-save-metric', choices=['auc_micro', 'auc_macro'], default='auc_micro',
+                        help='Model selection metric for LoS classification.')
     args = parser.parse_args()
     # Build ablation suffix for architecture variants
     _abl_flags = {
@@ -212,6 +286,8 @@ if __name__ == "__main__":
         args.save_dir = args.pretrain_dir
     else:
         args.save_dir = os.path.join(args.save_dir, args.dataset, model_name, f'seed_{args.seed}')
+    distributed_init(args)
+    configure_torch_runtime()
     if args.local_rank == 0 and args.save_model and not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
     if args.local_rank == 0:
@@ -255,9 +331,12 @@ if __name__ == "__main__":
     elif args.dataset == 'mimic_lengthofstay':
         args.input_dim = 17
         args.demo_dim = 0
-        args.num_class = 10
+        args.num_class = 10 if args.los_task == 'classification' else 1
         args.max_len = 24
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_lengthofstay()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_lengthofstay(
+            task=args.los_task,
+            label_unit=args.los_label_unit,
+        )
     else:
         raise Exception("Dataset not exist!")
     if args.data_dropout > 0:
@@ -265,7 +344,8 @@ if __name__ == "__main__":
         val_dataset.dropout_data(args.data_dropout)
         test_dataset.dropout_data(args.data_dropout)
     log(logger, 'Dataset Loaded.')
-    distributed_init(args)
+    dataloader_kwargs = build_dataloader_kwargs(args)
+    log(logger, f'DataLoader kwargs: {dataloader_kwargs}')
     if args.distributed:
         train_sampler = DistributedSampler(train_dataset, num_replicas=args.world_size, rank=args.rank, shuffle=True, drop_last=True)
         val_sampler = SequentialSampler(val_dataset)
@@ -274,26 +354,44 @@ if __name__ == "__main__":
         train_sampler = RandomSampler(train_dataset)
         val_sampler = SequentialSampler(val_dataset)
         test_sampler = SequentialSampler(test_dataset)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler, collate_fn=collate_fn)
-    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, sampler=val_sampler, collate_fn=collate_fn)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=test_sampler, collate_fn=collate_fn)
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=args.batch_size, sampler=train_sampler,
+        collate_fn=collate_fn, **dataloader_kwargs
+    )
+    val_dataloader = DataLoader(
+        val_dataset, batch_size=args.batch_size, sampler=val_sampler,
+        collate_fn=collate_fn, **dataloader_kwargs
+    )
+    test_dataloader = DataLoader(
+        test_dataset, batch_size=args.batch_size, sampler=test_sampler,
+        collate_fn=collate_fn, **dataloader_kwargs
+    )
     
     var_order_idx, inv_order_idx = get_variable_order(
         args.dataset.split('_')[0] if args.dataset.startswith('mimic') else args.dataset
     )
+    log(logger, 'Runtime init: variable order resolved.')
     args.var_order_idx = var_order_idx.cuda()
     args.inv_order_idx = inv_order_idx.cuda()
+    log(logger, 'Runtime init: variable order moved to CUDA.')
 
     encoder = Encoder(args).cuda()
+    log(logger, 'Runtime init: encoder moved to CUDA.')
     if args.use_smile_lean_v2 and not args.abl_no_dual_head:
         from models.smart import DualHeadClassifier
         classifier = DualHeadClassifier(args).cuda()
     else:
         classifier = Classifier(args).cuda()
+    log(logger, 'Runtime init: classifier moved to CUDA.')
     
     if args.distributed:
-        encoder = torch.nn.parallel.DistributedDataParallel(encoder, device_ids=[args.gpu], output_device=args.local_rank, find_unused_parameters=True)
-        classifier = torch.nn.parallel.DistributedDataParallel(classifier, device_ids=[args.gpu], output_device=args.local_rank, find_unused_parameters=True)
+        encoder = torch.nn.parallel.DistributedDataParallel(
+            encoder, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=True
+        )
+        classifier = torch.nn.parallel.DistributedDataParallel(
+            classifier, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=True
+        )
+        log(logger, 'Runtime init: DDP wrap complete.')
     
     param_groups = [
         {
@@ -310,11 +408,19 @@ if __name__ == "__main__":
         print_metrics = print_metrics_multilabel
         save_metric = 'auc_macro'
     elif args.dataset == 'mimic_lengthofstay':
-        class_weights = compute_class_weights(train_dataset, num_classes=10).cuda()
-        criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
-        log(logger, f'Class weights: {class_weights.tolist()}')
-        print_metrics = print_metrics_multilabel
-        save_metric = 'auc_macro'
+        if args.los_task == 'classification':
+            if args.los_use_class_weights:
+                class_weights = compute_class_weights(train_dataset, num_classes=10).cuda()
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+                log(logger, f'LoS class weights: {class_weights.tolist()}')
+            else:
+                criterion = torch.nn.CrossEntropyLoss()
+            print_metrics = print_metrics_multilabel
+            save_metric = args.los_save_metric
+        else:
+            criterion = torch.nn.MSELoss()
+            print_metrics = print_metrics_regression
+            save_metric = 'mse'
     elif args.dataset in ('mimic_decompensation', 'mimic_mortality'):
         # 与原论文一致，不加权重，极端权重会导致 AUPRC 崩溃
         criterion = torch.nn.CrossEntropyLoss()
@@ -334,8 +440,8 @@ if __name__ == "__main__":
     log(logger, "last saved model is in epoch {}".format(save_epoch))
     encoder.load_state_dict(checkpoint['encoder'])
 
-    best_auc = 0
     best_prc = 0
+    best_mse = float('inf')
     # Progressive MNAR dropout schedule: linear decay from initial to 0 over epochs
     _mnar_initial = args.smile_mnar_dropout_initial if args.smile_mnar_dropout_initial > 0 \
         else args.smile_mnar_dropout
@@ -346,6 +452,8 @@ if __name__ == "__main__":
         val_loss = 0
         encoder.train()
         classifier.train()
+        if args.distributed and isinstance(train_sampler, DistributedSampler):
+            train_sampler.set_epoch(i - 1)
         # Current MNAR dropout: linear decay if progressive schedule, else constant
         if _mnar_progressive:
             current_mnar_drop = _mnar_initial * max(0.0, 1.0 - (i - 1) / args.epochs)
@@ -354,7 +462,7 @@ if __name__ == "__main__":
         batch_bar = tqdm(train_dataloader, desc=f'  Ep{i:>3}', leave=False, unit='batch')
         for step, batch in enumerate(batch_bar, 1):
             for key in batch:
-                batch[key] = batch[key].cuda()
+                batch[key] = batch[key].cuda(non_blocking=True)
             policy_mask_clean = None
             if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
                     or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
@@ -381,7 +489,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             for batch in val_dataloader:
                 for key in batch:
-                    batch[key] = batch[key].cuda()
+                    batch[key] = batch[key].cuda(non_blocking=True)
                 policy_mask_clean = None
                 if (args.use_mnar or args.use_smile or args.use_smile_film or args.use_smile_v2
                         or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_samepretrain
@@ -398,20 +506,27 @@ if __name__ == "__main__":
         scheduler.step()
         epoch_bar.set_postfix(train=f'{t_loss:.4f}', val=f'{v_loss:.4f}')
         log(logger, 'Epoch %d: Train Loss %.4f, Valid Loss %.4f' % (i, t_loss, v_loss))
-        cur_mse = v_loss
-        if metrics[save_metric] > best_prc:
-            best_prc = metrics[save_metric]
-            if args.local_rank == 0:
-                state = {
-                    'encoder': encoder.state_dict(),
-                    'classifier': classifier.state_dict(),
-                    'epoch': i
-                }
-                log(logger, f'----- Save best model - {save_metric}: %.4f -----' % metrics[save_metric])
-                torch.save(state, os.path.join(args.save_dir, 'checkpoint-prc.pth'))
+        current_metric = metrics[save_metric]
+        should_save = False
+        if save_metric == 'mse':
+            if current_metric < best_mse:
+                best_mse = current_metric
+                should_save = True
+        else:
+            if current_metric > best_prc:
+                best_prc = current_metric
+                should_save = True
+        if should_save and args.local_rank == 0:
+            state = {
+                'encoder': encoder.state_dict(),
+                'classifier': classifier.state_dict(),
+                'epoch': i
+            }
+            log(logger, f'----- Save best model - {save_metric}: %.4f -----' % current_metric)
+            torch.save(state, os.path.join(args.save_dir, 'checkpoint-prc.pth'))
         if args.distributed:
             dist.barrier()
 
     if args.distributed:
         dist.barrier()
-    test(args, 'checkpoint-prc.pth', test_dataloader)
+    test(args, 'checkpoint-prc.pth', test_dataloader, val_dataloader)

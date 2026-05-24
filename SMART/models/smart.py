@@ -1821,6 +1821,11 @@ class PolicyDensityEmbedder(nn.Module):
             )
 
     def forward(self, x, mask, density, original_mask=None):
+        # DataLoader/collate may surface masks as integer tensors; keep the
+        # policy-density pathway explicitly in floating point for Linear layers.
+        x = x.float()
+        mask = mask.float()
+        density = density.float()
         # Continuous feature projection
         inp = torch.stack((x, mask, density), dim=-1)   # (B, T, V, 3)
         out = self.embed(inp)                            # (B, T, V, d_model)
@@ -2156,7 +2161,7 @@ class SMILELeanV2Encoder(nn.Module):
             d = F.avg_pool1d(m, kernel_size=ws, stride=1, padding=ws // 2)
             density = d.reshape(B_m, V_m, T_m).permute(0, 2, 1)  # (B, T, V)
         else:
-            density = torch.zeros_like(mask)
+            density = torch.zeros_like(mask, dtype=x.dtype)
 
         # Embed with policy tokens
         x = self.embedder(x, mask, density, original_mask)    # (B, V, T, d)
