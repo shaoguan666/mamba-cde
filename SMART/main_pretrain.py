@@ -14,6 +14,7 @@ from data.challenge2012 import load_challenge_2012
 from data.challenge2019 import load_challenge_2019
 from data.mimiciii import load_mimic_iii_mortality, load_mimic_iii_phenotyping, load_mimic_iii_decompensation, load_mimic_iii_lengthofstay
 from data.dataloader import collate_fn
+from data.feature_registry import REGISTRY_VERSION, registry_fingerprint
 from models.smart import EmbeddingDecoder
 from utils.utils import (
     set_seed,
@@ -104,128 +105,94 @@ def proportional_random_masking(x, original_mask, min_mask_ratio, max_mask_ratio
 
 # ── Variable groupings (dynamically built from feature names) ─────────────────
 
-CARDIOVASCULAR_NAMES = {
-    # C12/C19 short names
-    'HR', 'SysBP', 'DiaBP', 'MAP', 'HeartRate',
-    'NBPsys', 'NBPdia', 'NBPmean', 'MeanBP', 'SystolicBP', 'DiastolicBP',
-    'SBP', 'DBP',
-    # MIMIC-III YerevaNN benchmark full names
-    'Heart Rate', 'Diastolic blood pressure',
-    'Mean blood pressure', 'Systolic blood pressure',
-}
-RESPIRATORY_NAMES = {
-    # C12/C19 short names
-    'RR', 'SpO2', 'FiO2', 'PaO2', 'PaCO2', 'pH', 'Resp',
-    'SaO2', 'EtCO2', 'RespRate', 'O2Sat', 'BE', 'BaseExcess',
-    # MIMIC-III YerevaNN benchmark full names
-    'Fraction inspired oxygen', 'Oxygen saturation',
-    'Respiratory rate', 'pH',
-}
-RENAL_NAMES = {
-    'Creatinine', 'BUN', 'Urine', 'Chloride', 'Sodium', 'Potassium', 'HCO3',
-    'Blood urea nitrogen',
-}
-HEPATIC_NAMES = {
-    'TotalBili', 'Albumin', 'ASAT', 'ALAT', 'ALP', 'Bilirubin', 'Bilirubin_direct',
-    'Bilirubin_total', 'AST', 'Alkalinephos',
-}
-HEMATOLOGY_NAMES = {
-    'WBC', 'Hct', 'Platelets', 'PTT', 'PT', 'Hgb', 'Fibrinogen',
-    'White blood cell count', 'Hematocrit',
-}
-METABOLIC_NAMES = {
-    'Glucose', 'Lactate', 'Magnesium', 'Calcium', 'Troponin', 'TroponinI',
-    'Phosphate', 'PaO2FiO2',
-}
+def uses_structured_masking(args):
+    """Return whether a run can invoke the audited system-masking branch."""
+    uses_smile = (
+        args.use_smile or args.use_smile_film or args.use_smile_v2
+        or args.use_smile_v2_film or args.use_smile_lean or args.use_smile_lean_v2
+    )
+    if not uses_smile or args.use_mnar or args.use_smile_lean_samepretrain:
+        return False
+    if args.smile_no_curriculum:
+        return False
+    return args.smile_stratified or args.smile_mask_type != 'temporal'
 
 
-def build_system_groups(feature_names):
-    """Build physiological system groupings from feature names. Returns {} when empty.
+def get_mask_system_groups(args):
+    """Read and validate selected system groups from the audit artifact."""
+    if not uses_structured_masking(args):
+        return {}, None
+    if not args.mask_group_config:
+        raise ValueError(
+            '--mask-group-config is required when structured/system masking is enabled.'
+        )
+    try:
+        with open(args.mask_group_config, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f'Unable to load mask-group config {args.mask_group_config!r}: {exc}'
+        ) from exc
 
-    Splits variables into 6 physiological sub-groups (3-8 vars each) instead of
-    a monolithic 'lab' group. This prevents system_level_masking from wiping out
-    73% of C12 variables at once (which caused extreme val loss spikes).
-    """
-    if not feature_names:
-        return {}
-    groups = {
-        'cardiovascular': [i for i, f in enumerate(feature_names) if f in CARDIOVASCULAR_NAMES],
-        'respiratory':    [i for i, f in enumerate(feature_names) if f in RESPIRATORY_NAMES],
-        'renal':          [i for i, f in enumerate(feature_names) if f in RENAL_NAMES],
-        'hepatic':        [i for i, f in enumerate(feature_names) if f in HEPATIC_NAMES],
-        'hematology':     [i for i, f in enumerate(feature_names) if f in HEMATOLOGY_NAMES],
-        'metabolic':      [i for i, f in enumerate(feature_names) if f in METABOLIC_NAMES],
+    if payload.get('registry_version') != REGISTRY_VERSION:
+        raise ValueError(
+            f'Mask-group registry_version mismatch: config={payload.get("registry_version")!r}, '
+            f'runtime={REGISTRY_VERSION!r}.'
+        )
+    if payload.get('selection_rule') != 'delta > 0.5':
+        raise ValueError(
+            f'Unsupported mask-group selection_rule: {payload.get("selection_rule")!r}.'
+        )
+    if payload.get('split') != 'train':
+        raise ValueError(
+            f'Mask-group config must be derived from split "train", got {payload.get("split")!r}.'
+        )
+    if payload.get('split_seed') != args.split_seed:
+        raise ValueError(
+            f'Mask-group split_seed mismatch: config={payload.get("split_seed")!r}, '
+            f'runtime={args.split_seed!r}.'
+        )
+
+    task = payload.get('tasks', {}).get(args.dataset)
+    if not isinstance(task, dict):
+        raise ValueError(f'Mask-group config does not contain task {args.dataset!r}.')
+    fingerprint = registry_fingerprint(args.dataset)
+    if task.get('registry_fingerprint') != fingerprint:
+        raise ValueError(
+            f'Mask-group registry_fingerprint mismatch for {args.dataset}: '
+            f'config={task.get("registry_fingerprint")!r}, runtime={fingerprint!r}.'
+        )
+
+    selected_groups = task.get('selected_groups')
+    if not isinstance(selected_groups, dict):
+        raise ValueError(f'Mask-group selected_groups for {args.dataset} must be an object.')
+    system_groups = {}
+    for group_name, indices in selected_groups.items():
+        if not isinstance(group_name, str) or not isinstance(indices, list):
+            raise ValueError(f'Invalid selected group entry for {group_name!r}.')
+        checked_indices = []
+        for index in indices:
+            if isinstance(index, bool) or not isinstance(index, int):
+                raise ValueError(
+                    f'Mask-group index for {group_name!r} must be an integer: {index!r}.'
+                )
+            if index < 0 or index >= args.input_dim:
+                raise ValueError(
+                    f'Mask-group index out of bounds for {args.dataset}/{group_name}: '
+                    f'{index} not in [0, {args.input_dim}).'
+                )
+            checked_indices.append(index)
+        if checked_indices:
+            system_groups[group_name] = checked_indices
+    metadata = {
+        'registry_version': REGISTRY_VERSION,
+        'registry_fingerprint': fingerprint,
+        'split': payload['split'],
+        'split_seed': payload['split_seed'],
+        'selection_rule': payload['selection_rule'],
+        'selected_groups': system_groups,
     }
-    used = set(idx for g in groups.values() for idx in g)
-    other = [i for i in range(len(feature_names)) if i not in used]
-    if other:
-        groups['other'] = other
-    return {k: v for k, v in groups.items() if v}
-
-
-# Dataset-specific system groups keyed by FEATURE_NAMES_* index order.
-# C12 indices based on FEATURE_NAMES_C12 (data/challenge2012.py),
-# informed by t4_block.csv block-missingness significance (analysis/results/).
-_C12_MASK_GROUPS = {
-    # Significant co-missingness (delta > 0.5 in t4_block.csv)
-    'Vital_Invasive':  [3, 4, 5],               # SysBP, MAP, DiaBP
-    'Blood_Gas':       [8, 20, 21, 22],          # pH, FiO2, PaO2, PaCO2
-    'Electrolyte':     [10, 11, 12, 17, 18],     # Sodium, Potassium, HCO3, Magnesium, Calcium
-    'Liver_Enzyme':    [13, 14, 23, 24, 25, 28], # TotalBili, Albumin, ASAT, ALAT, ALP, Bilirubin
-    'CBC':             [7, 19, 32],              # WBC, Hct, Platelets
-    'Oxygenation':     [1, 35, 36],             # SpO2, PaO2FiO2, BE
-    'Metabolic':       [15, 16],                # Glucose, Lactate
-    # Removed (E-fix): Vital_Basic(delta=-0.035), Renal(p=0.40), Coagulation(delta=-0.13)
-    # GCS(27), Weight(29), MechVent(30) not grouped (non-physiological)
-    # Troponin(31), PTT(33), PT(34) ungrouped (no co-missingness support)
-    # HR(0), Temp(2), Resp(6), Creatinine(9), Urine(26) ungrouped (no co-missingness)
-}
-
-# C19: indices based on FEATURE_NAMES_C19 (challenge2019.py) = C19_FEATURES order (verified).
-# Groups validated against analysis/results/C19_Sepsis/t4_block.csv.
-_C19_MASK_GROUPS = {
-    'Vital_Basic':    [0, 1, 2, 3, 4, 5, 6],    # HR, O2Sat, Temp, SBP, MAP, DBP, Resp
-    'Resp_Gas':       [7, 8, 9, 10, 11, 12, 13], # EtCO2, BaseExcess, HCO3, FiO2, pH, PaCO2, SaO2
-    'Liver_Enzyme':   [14, 16],                  # AST, Alkalinephos
-    'Renal':          [15, 18, 19],              # BUN, Chloride, Creatinine
-    'Coagulation':    [30, 32, 33],              # PTT, Fibrinogen, Platelets
-    'CBC':            [28, 29, 31],              # Hct, Hgb, WBC
-    'Bilirubin':      [20, 26],                  # Bilirubin_direct, Bilirubin_total
-    # Removed (E-fix): Blood_Gas_Acid (subset of Resp_Gas, 4 overlapping indices)
-    # Removed (E-fix): Electrolyte (delta=0.10, p=0.16, not significant)
-    # Calcium(17), Lactate(22), TroponinI(27) ungrouped (low block-missingness in t4)
-}
-
-# MIMIC-III: indices based on FEATURE_NAMES_MIMIC (mimiciii.py) = MIMIC_FEATURES order (verified).
-# Groups validated against analysis/results/MIMIC3_Mortality/t4_block.csv.
-_MIMIC_MASK_GROUPS = {
-    'Vital_BP':    [1, 10, 13],         # DiasBP, MeanBP, SysBP
-    'Vital_Basic': [0, 8, 11, 12, 14],  # CapRefill, HR, O2Sat, RespRate, Temp
-    'GCS':         [3, 4, 5, 6],        # GCS eye/motor/total/verbal
-    'Anthropo':    [9, 15],             # Height, Weight
-    # Removed (E-fix): Resp_Gas (delta=0.005, p=0.27, no co-missingness support)
-    #   - also eliminates O2Sat(11) double-membership (was in Vital_Basic + Resp_Gas)
-    #   - FiO2(2), pH(16) fall back to random/temporal masking
-    # Glucose(7) ungrouped (no natural co-missingness group in MIMIC)
-}
-
-_DATASET_MASK_GROUPS = {
-    'c12': _C12_MASK_GROUPS,
-    'c19': _C19_MASK_GROUPS,
-    'mimic_mortality':     _MIMIC_MASK_GROUPS,
-    'mimic_phenotyping':   _MIMIC_MASK_GROUPS,
-    'mimic_decompensation': _MIMIC_MASK_GROUPS,
-    'mimic_lengthofstay':  _MIMIC_MASK_GROUPS,
-}
-
-
-def get_mask_system_groups(dataset, feature_names):
-    """Return dataset-specific index-based system groups for system_level_masking.
-    Uses hardcoded index groups for known datasets; falls back to name-matching for others.
-    """
-    if dataset in _DATASET_MASK_GROUPS:
-        return _DATASET_MASK_GROUPS[dataset]
-    return build_system_groups(feature_names)
+    return system_groups, metadata
 
 
 # ── Masking strategy functions ────────────────────────────────────────────────
@@ -425,7 +392,11 @@ if __name__ == "__main__":
                         help='DataLoader workers per process. Defaults to a conservative auto setting.')
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--save_model', type=bool, default=True)
-    parser.add_argument('--save_dir', type=str, default='./export/')
+    parser.add_argument('--save_dir', '--save-dir', dest='save_dir', type=str, default='./export/')
+    parser.add_argument('--mask-group-config', type=str, default=None,
+                        help='Audited selected-mask-groups JSON required by structured/system masking.')
+    parser.add_argument('--split-seed', type=int, default=42,
+                        help='Fixed patient split seed associated with the mask-group audit.')
     parser.add_argument('--local-rank', type=int, default=0)
     parser.add_argument('--min_mask_ratio', type=float, default=0.15)
     parser.add_argument('--max_mask_ratio', type=float, default=0.75)
@@ -496,6 +467,8 @@ if __name__ == "__main__":
                         help='Custom fixed masking mix (system temporal random), must sum to 1. '
                              'Overrides dataset-adaptive defaults when --smile-stratified is set.')
     args = parser.parse_args()
+    if args.dataset in ('c12', 'c19') and args.split_seed != 42:
+        raise ValueError(f'{args.dataset} loaders currently expose only the fixed split seed 42.')
     # Build ablation suffix for architecture variants
     _abl_flags = {
         'no-density': args.abl_no_density,
@@ -604,19 +577,19 @@ if __name__ == "__main__":
         args.demo_dim = 0
         args.num_class = 2
         args.max_len = 48
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_mortality()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_mortality(split_seed=args.split_seed)
     elif args.dataset == 'mimic_phenotyping':
         args.input_dim = 17
         args.demo_dim = 0
         args.num_class = 25
         args.max_len = 60
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_phenotyping()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_phenotyping(split_seed=args.split_seed)
     elif args.dataset == 'mimic_decompensation':
         args.input_dim = 17
         args.demo_dim = 0
         args.num_class = 2
         args.max_len = 24
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_decompensation()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_decompensation(split_seed=args.split_seed)
     elif args.dataset == 'mimic_lengthofstay':
         args.input_dim = 17
         args.demo_dim = 0
@@ -626,6 +599,7 @@ if __name__ == "__main__":
         train_dataset, val_dataset, test_dataset = load_mimic_iii_lengthofstay(
             task='regression',
             label_unit='auto',
+            split_seed=args.split_seed,
         )
     else:
         raise Exception("Dataset not exist!")
@@ -634,9 +608,15 @@ if __name__ == "__main__":
         val_dataset.dropout_data(args.data_dropout)
         test_dataset.dropout_data(args.data_dropout)
     log(logger, 'Dataset Loaded.')
-    feature_names = getattr(train_dataset, 'feature_names', [])
-    system_groups = get_mask_system_groups(args.dataset, feature_names)
-    log(logger, f'system_groups: { {k: len(v) for k, v in system_groups.items()} }')
+    system_groups, mask_group_metadata = get_mask_system_groups(args)
+    if mask_group_metadata is not None:
+        log(logger, '[Mask Groups] registry_version={registry_version} '
+                    'registry_fingerprint={registry_fingerprint} split={split} '
+                    'split_seed={split_seed} threshold={selection_rule}'.format(
+                        **mask_group_metadata))
+        log(logger, f'[Mask Groups] selected_groups={mask_group_metadata["selected_groups"]}')
+    elif args.mask_group_config:
+        log(logger, '[Mask Groups] structured masking disabled; supplied config is not consumed.')
     dataloader_kwargs = build_dataloader_kwargs(args)
     log(logger, f'DataLoader kwargs: {dataloader_kwargs}')
     if args.dataset != 'all':

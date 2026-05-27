@@ -15,8 +15,9 @@ except Exception:  # pragma: no cover
 
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_LONG = HERE / "results" / "bibm_results_long.csv"
-DEFAULT_OUT = HERE / "results" / "significance_tests.csv"
+DEFAULT_RESULTS = HERE / "results" / "bibm_audit_fixed"
+DEFAULT_LONG = DEFAULT_RESULTS / "bibm_results_long.csv"
+DEFAULT_OUT = DEFAULT_RESULTS / "significance_tests.csv"
 
 
 def read_rows(path: Path) -> list[dict]:

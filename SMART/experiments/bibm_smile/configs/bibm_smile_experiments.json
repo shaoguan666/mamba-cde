@@ -31,6 +31,17 @@
       "required_code": "Add an attention-bias path with the same tensor shape as co-missingness bias but generated independently of the sample mask."
     }
   },
+  "revision_defaults": {
+    "run_tag": "bibm_audit_fixed",
+    "output_root": "./export/bibm_audit_fixed",
+    "results_root": "./experiments/bibm_smile/results/bibm_audit_fixed",
+    "mask_group_config": "analysis/results/bibm_audit_fixed/selected_mask_groups.json",
+    "split": "train",
+    "split_seed": 42,
+    "selection_rule": "delta > 0.5",
+    "capacity_control": "not_implemented",
+    "random_bias_control": "not_implemented"
+  },
   "runner_defaults": {
     "pretrain_epochs": 25,
     "finetune_epochs": 25,

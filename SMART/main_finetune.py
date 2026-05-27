@@ -153,9 +153,11 @@ if __name__ == "__main__":
                         help='DataLoader workers per process. Defaults to a conservative auto setting.')
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--save_model', type=bool, default=True)
-    parser.add_argument('--save_dir', type=str, default='./export/')
+    parser.add_argument('--save_dir', '--save-dir', dest='save_dir', type=str, default='./export/')
     parser.add_argument('--pretrain-dir', type=str, default=None,
                         help='Directory containing pretrained checkpoint-mse.pth. Defaults to save_dir.')
+    parser.add_argument('--split-seed', type=int, default=42,
+                        help='Fixed patient split seed used consistently with pretraining.')
     parser.add_argument('--local-rank', type=int, default=0)
     parser.add_argument('--e_layers', type=int, default=2)
     parser.add_argument('--n_heads', type=int, default=4)
@@ -220,6 +222,8 @@ if __name__ == "__main__":
     parser.add_argument('--los-save-metric', choices=['auc_micro', 'auc_macro'], default='auc_micro',
                         help='Model selection metric for LoS classification.')
     args = parser.parse_args()
+    if args.dataset in ('c12', 'c19') and args.split_seed != 42:
+        raise ValueError(f'{args.dataset} loaders currently expose only the fixed split seed 42.')
     # Build ablation suffix for architecture variants
     _abl_flags = {
         'no-density': args.abl_no_density,
@@ -282,10 +286,7 @@ if __name__ == "__main__":
     else:
         from models.smart import Encoder
         model_name = 'smart'
-    if args.pretrain_dir:
-        args.save_dir = args.pretrain_dir
-    else:
-        args.save_dir = os.path.join(args.save_dir, args.dataset, model_name, f'seed_{args.seed}')
+    args.save_dir = os.path.join(args.save_dir, args.dataset, model_name, f'seed_{args.seed}')
     distributed_init(args)
     configure_torch_runtime()
     if args.local_rank == 0 and args.save_model and not os.path.exists(args.save_dir):
@@ -315,19 +316,19 @@ if __name__ == "__main__":
         args.demo_dim = 0
         args.num_class = 2
         args.max_len = 48
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_mortality()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_mortality(split_seed=args.split_seed)
     elif args.dataset == 'mimic_phenotyping':
         args.input_dim = 17
         args.demo_dim = 0
         args.num_class = 25
         args.max_len = 60
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_phenotyping()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_phenotyping(split_seed=args.split_seed)
     elif args.dataset == 'mimic_decompensation':
         args.input_dim = 17
         args.demo_dim = 0
         args.num_class = 2
         args.max_len = 24
-        train_dataset, val_dataset, test_dataset = load_mimic_iii_decompensation()
+        train_dataset, val_dataset, test_dataset = load_mimic_iii_decompensation(split_seed=args.split_seed)
     elif args.dataset == 'mimic_lengthofstay':
         args.input_dim = 17
         args.demo_dim = 0
@@ -336,6 +337,7 @@ if __name__ == "__main__":
         train_dataset, val_dataset, test_dataset = load_mimic_iii_lengthofstay(
             task=args.los_task,
             label_unit=args.los_label_unit,
+            split_seed=args.split_seed,
         )
     else:
         raise Exception("Dataset not exist!")

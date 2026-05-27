@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Patient-level missingness case-study figures for the SMILE paper.
+"""Patient-level structured-missingness case-study figures for the SMILE paper.
 
 The script selects label-stratified patient exemplars and plots, for each
 patient, a co-missingness residual heatmap above the temporal observation mask.
 It is intended as a candidate replacement/supplement for Figure 2 when the
-paper text needs concrete patient-level examples.
+paper text needs concrete training-split structured-missingness examples.
 
 Run from SMART/:
     python analysis/patient_mnar_case_studies.py
@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
-import pickle
 import shutil
 from pathlib import Path
+import sys
 
 import matplotlib
 
@@ -29,35 +28,32 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
-from mnar_verification import (
-    C12_FEATURES,
-    C12_SYSTEMS,
-    C19_FEATURES,
-    C19_SYSTEMS,
-    MIMIC_FEATURES,
-    MIMIC_SYSTEMS,
-)
+SMART_ROOT = Path(__file__).resolve().parents[1]
+if str(SMART_ROOT) not in sys.path:
+    sys.path.insert(0, str(SMART_ROOT))
+
+from data.challenge2012 import load_challenge_2012  # noqa: E402
+from data.challenge2019 import load_challenge_2019  # noqa: E402
+from data.feature_registry import get_candidate_systems, get_feature_names, validate_registry  # noqa: E402
+from data.mimiciii import load_mimic_iii_mortality  # noqa: E402
 
 
 DATASETS = {
     "C12_Mortality": {
-        "pkl": Path("data/Challenge2012/data_normalized.pkl"),
-        "features": C12_FEATURES,
-        "systems": C12_SYSTEMS,
+        "registry": "c12",
+        "loader": load_challenge_2012,
         "max_t": 48,
         "short": "C12",
     },
     "C19_Sepsis": {
-        "pkl": Path("data/Challenge2019/data_normalized.pkl"),
-        "features": C19_FEATURES,
-        "systems": C19_SYSTEMS,
+        "registry": "c19",
+        "loader": load_challenge_2019,
         "max_t": 60,
         "short": "C19",
     },
     "MIMIC3_Mortality": {
-        "pkl": Path("data/MIMIC-III/mortality_normalized.pkl"),
-        "features": MIMIC_FEATURES,
-        "systems": MIMIC_SYSTEMS,
+        "registry": "mimic_mortality",
+        "loader": load_mimic_iii_mortality,
         "max_t": 48,
         "short": "MIMIC",
     },
@@ -77,19 +73,12 @@ SYSTEM_COLORS = [
 ]
 
 
-def load_pickle(path: Path):
-    with path.open("rb") as f:
-        payload = pickle.load(f)
-    if len(payload) == 4:
-        x, y, mask, names = payload
-    elif len(payload) == 5:
-        if isinstance(payload[3], list) and payload[3] and isinstance(payload[3][0], str):
-            x, y, mask, names, _splits = payload
-        else:
-            x, y, _static, mask, names = payload
-    else:
-        raise ValueError(f"Unexpected pickle format with {len(payload)} elements: {path}")
-    return x, y, mask, names
+def load_training_examples(cfg):
+    train_dataset, _val_dataset, _test_dataset = cfg["loader"]()
+    y = [sample["labels"] for sample in train_dataset.data]
+    masks = [sample["mask"] for sample in train_dataset.data]
+    names = list(getattr(train_dataset, "patient_ids", ()))
+    return y, masks, names
 
 
 def scalar_label(label) -> int:
@@ -321,10 +310,12 @@ def draw_temporal_mask(fig, spec, mask, order, boundaries, max_t, show_ylabel=Fa
 
 def plot_dataset_cases(dataset: str, out_dir: Path, paper_dir: Path | None, per_label: int):
     cfg = DATASETS[dataset]
-    _x, y, masks, names = load_pickle(cfg["pkl"])
-    feature_names = cfg["features"][: np.asarray(masks[0]).shape[1]]
-    order, boundaries = panel_order(feature_names, cfg["systems"])
-    stats = compute_patient_stats(y, masks, names, cfg["systems"], cfg["max_t"])
+    y, masks, names = load_training_examples(cfg)
+    validate_registry(cfg["registry"], np.asarray(masks[0]).shape[1])
+    feature_names = get_feature_names(cfg["registry"])
+    systems = get_candidate_systems(cfg["registry"])
+    order, boundaries = panel_order(feature_names, systems)
+    stats = compute_patient_stats(y, masks, names, systems, cfg["max_t"])
     selected = select_contrast_cases(stats, per_label=per_label)
     selected.insert(0, "dataset", dataset)
 
@@ -361,7 +352,7 @@ def plot_dataset_cases(dataset: str, out_dir: Path, paper_dir: Path | None, per_
         draw_temporal_mask(fig, gs[1, col], mask, order, boundaries, cfg["max_t"], show_ylabel=(col == 0))
 
     fig.suptitle(
-        f"{cfg['short']} patient-level structured missingness examples",
+        f"{cfg['short']} train-split structured missingness examples",
         fontsize=13,
         fontweight="bold",
         y=0.975,
@@ -389,7 +380,7 @@ def plot_dataset_cases(dataset: str, out_dir: Path, paper_dir: Path | None, per_
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"figure2_patient_mnar_cases_{dataset.lower()}"
+    stem = f"figure2_patient_structured_missingness_cases_{dataset.lower()}"
     paths = []
     for ext in ("png", "pdf", "svg"):
         path = out_dir / f"{stem}.{ext}"
@@ -417,7 +408,7 @@ def default_paper_dir() -> Path | None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Draw patient-level MNAR case-study figures.")
+    parser = argparse.ArgumentParser(description="Draw training-split structured-missingness case-study figures.")
     parser.add_argument(
         "--datasets",
         nargs="+",
@@ -448,7 +439,7 @@ def main():
         ]].to_string(index=False))
 
     combined = pd.concat(all_selected, ignore_index=True)
-    combined_path = args.out_dir / "figure2_patient_mnar_cases_selected_all.csv"
+    combined_path = args.out_dir / "figure2_patient_structured_missingness_cases_selected_all.csv"
     combined.to_csv(combined_path, index=False)
     if args.paper_dir is not None:
         args.paper_dir.mkdir(parents=True, exist_ok=True)

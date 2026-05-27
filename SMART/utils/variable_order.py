@@ -1,5 +1,5 @@
 import torch
-from analysis.mnar_verification import C12_SYSTEMS, C19_SYSTEMS, MIMIC_SYSTEMS, C12_FEATURES, C19_FEATURES, MIMIC_FEATURES
+from data.feature_registry import get_candidate_systems, get_feature_names
 
 def get_variable_order(dataset_name):
     """
@@ -11,17 +11,8 @@ def get_variable_order(dataset_name):
         inv_order_idx: (V,) tensor for post-CNN inverse permutation
     """
     
-    if dataset_name == 'c12':
-        systems = C12_SYSTEMS
-        features = C12_FEATURES
-    elif dataset_name == 'c19':
-        systems = C19_SYSTEMS
-        features = C19_FEATURES
-    elif dataset_name.startswith('mimic'):
-        systems = MIMIC_SYSTEMS
-        features = MIMIC_FEATURES
-    else:
-        raise ValueError(f"Unknown dataset '{dataset_name}'")
+    systems = get_candidate_systems(dataset_name)
+    features = get_feature_names(dataset_name)
         
     num_vars = len(features)
     

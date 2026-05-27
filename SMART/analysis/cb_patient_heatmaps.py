@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Patient-level C_b co-missingness heatmaps for SMILE.
+Patient-level structured-missingness C_b heatmaps for SMILE.
 
-Run from either the repository root or SMART/:
+Run from SMART/:
     python analysis/cb_patient_heatmaps.py
 
-The script computes
+The script selects examples from the fixed training split and computes
     C_b = R_b.T @ R_b / T - q_b q_b.T,  q_b = mean_t R_b[t]
 where R_b = 1 - mask_b and mask_b uses 1=observed, 0=missing.
 """
@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import argparse
 import math
-import pickle
 import re
-from collections import OrderedDict
 from pathlib import Path
+import sys
 
 import matplotlib
 
@@ -27,20 +26,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+SMART_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SMART_ROOT))
 
-MIMIC_FEATURES = [
-    "CapRefill", "DiasBP", "FiO2", "GCS_Eye", "GCS_Motor",
-    "GCS_Total", "GCS_Verbal", "Glucose", "HR", "Height",
-    "MeanBP", "O2Sat", "RespRate", "SysBP", "Temp", "Weight", "pH",
-]
+from data.feature_registry import get_candidate_systems, get_feature_names, validate_registry  # noqa: E402
+from data.mimiciii import load_mimic_iii_mortality  # noqa: E402
 
-MIMIC_SYSTEMS = OrderedDict([
-    ("Vital BP", [1, 10, 13]),
-    ("Vital signs", [8, 11, 12, 14]),
-    ("GCS", [3, 4, 5, 6]),
-    ("Resp./gas", [2, 11, 16]),
-    ("Anthrop.", [9, 15]),
-])
+
+MIMIC_DATASET = "mimic_mortality"
+MIMIC_SYSTEMS = get_candidate_systems(MIMIC_DATASET)
 
 
 def repo_paths() -> tuple[Path, Path]:
@@ -49,21 +43,13 @@ def repo_paths() -> tuple[Path, Path]:
     return repo_root, smart_root
 
 
-def load_pickle(pkl_path: Path):
-    with pkl_path.open("rb") as f:
-        payload = pickle.load(f)
-
-    if len(payload) == 4:
-        x, y, mask, names = payload
-    elif len(payload) == 5:
-        if isinstance(payload[3], list) and payload[3] and isinstance(payload[3][0], str):
-            x, y, mask, names, _split_sizes = payload
-        else:
-            x, y, _static, mask, names = payload
-    else:
-        raise ValueError(f"Unexpected pickle format with {len(payload)} elements: {pkl_path}")
-
-    return x, y, mask, names
+def load_training_examples(split_seed: int):
+    train_dataset, _val_dataset, _test_dataset = load_mimic_iii_mortality(split_seed=split_seed)
+    x = [sample["x"] for sample in train_dataset.data]
+    y = [sample["labels"] for sample in train_dataset.data]
+    masks = [sample["mask"] for sample in train_dataset.data]
+    names = list(getattr(train_dataset, "patient_ids", ()))
+    return x, y, masks, names
 
 
 def scalar_label(label) -> int:
@@ -105,24 +91,18 @@ def build_order(n_vars: int):
     return order, boundaries
 
 
-def significant_groups(t4_csv: Path) -> set[str]:
-    aliases = {
-        "Vital_BP": "Vital BP",
-        "Vital_Basic": "Vital signs",
-        "GCS": "GCS",
-        "Resp_Gas": "Resp./gas",
-        "Anthropo": "Anthrop.",
-    }
+def selected_groups(t4_csv: Path) -> set[str]:
     if not t4_csv.exists():
-        return {"Vital BP", "Vital signs", "GCS"}
+        return set(MIMIC_SYSTEMS)
     df = pd.read_csv(t4_csv)
-    if "system" not in df or "significant" not in df:
-        return {"Vital BP", "Vital signs", "GCS"}
+    if "group" not in df or "selected" not in df:
+        raise ValueError(f"T4 CSV does not use the structured-audit schema: {t4_csv}")
     keep = set()
     for _, row in df.iterrows():
-        if bool(row["significant"]):
-            keep.add(aliases.get(str(row["system"]), str(row["system"])))
-    return keep or {"Vital BP", "Vital signs", "GCS"}
+        selected = str(row["selected"]).lower() in {"true", "1", "yes"}
+        if selected:
+            keep.add(str(row["group"]))
+    return keep or set(MIMIC_SYSTEMS)
 
 
 def block_pairs(n_vars: int, keep_systems: set[str]) -> list[tuple[int, int]]:
@@ -230,7 +210,7 @@ def draw_heatmap(
             ax.text(
                 end - 0.15,
                 start + 0.15,
-                system,
+                system.replace("_", " "),
                 fontsize=6.2,
                 ha="right",
                 va="top",
@@ -297,7 +277,7 @@ def make_grid(selected: pd.DataFrame, masks, out_base: Path, feature_names: list
         ax.axis("off")
 
     fig.suptitle(
-        "Patient-level co-missingness residual matrix $C_b$",
+        "Train-split structured missingness: patient-level residual matrix $C_b$",
         fontsize=11,
         y=0.985,
     )
@@ -336,16 +316,10 @@ def main():
     repo_root, smart_root = repo_paths()
     parser = argparse.ArgumentParser(description="Plot patient-level SMILE C_b heatmaps.")
     parser.add_argument(
-        "--pkl",
-        type=Path,
-        default=smart_root / "data" / "MIMIC-III" / "mortality_normalized.pkl",
-        help="SMART-format pickle path.",
-    )
-    parser.add_argument(
         "--t4-csv",
         type=Path,
-        default=smart_root / "analysis" / "results" / "MIMIC3_Mortality" / "t4_block.csv",
-        help="T4 block CSV used to identify significant systems.",
+        default=smart_root / "analysis" / "results" / "mimic_mortality" / "t4_block.csv",
+        help="Structured-audit T4 CSV used to identify selected systems.",
     )
     parser.add_argument(
         "--out-dir",
@@ -354,26 +328,28 @@ def main():
         help="Output directory.",
     )
     parser.add_argument("--per-label", type=int, default=2, help="Number of selected patients per label.")
+    parser.add_argument("--split-seed", type=int, default=42, help="Training-split seed used by the SMART loader.")
     parser.add_argument("--min-missing", type=float, default=0.05)
     parser.add_argument("--max-missing", type=float, default=0.95)
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    x, y, masks, names = load_pickle(args.pkl)
-    _ = x  # The heatmap uses masks only; x is loaded to validate the SMART payload.
+    x, y, masks, names = load_training_examples(args.split_seed)
+    _ = x  # The heatmap uses masks only; loading x confirms the dataset payload.
 
-    feature_names = MIMIC_FEATURES[: np.asarray(masks[0]).shape[1]]
-    keep_systems = significant_groups(args.t4_csv)
+    validate_registry(MIMIC_DATASET, np.asarray(masks[0]).shape[1])
+    feature_names = get_feature_names(MIMIC_DATASET)
+    keep_systems = selected_groups(args.t4_csv)
     pairs = block_pairs(len(feature_names), keep_systems)
     selected = select_patients(y, masks, names, pairs, args.per_label, args.min_missing, args.max_missing)
 
     selected["selection_note"] = (
-        "Label-stratified top samples by positive within-significant-system C_b."
+        "Train-split label-stratified examples by positive within-retained-system C_b."
     )
-    metadata_path = args.out_dir / "mimic_mortality_cb_patient_metadata.csv"
+    metadata_path = args.out_dir / "mimic_mortality_structured_missingness_cb_patient_metadata.csv"
     selected.to_csv(metadata_path, index=False)
 
-    out_base = args.out_dir / "mimic_mortality_cb_patient_grid"
+    out_base = args.out_dir / "mimic_mortality_structured_missingness_cb_patient_grid"
     make_grid(selected, masks, out_base, feature_names)
     make_individuals(selected, masks, args.out_dir, feature_names)
 

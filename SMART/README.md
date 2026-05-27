@@ -8,7 +8,7 @@ This directory started from the official implementation of [SMART: Towards Pre-t
 - `main_finetune.py` fine-tunes classifiers or LoS heads from pretrained checkpoints.
 - `run_all_experiments.py` orchestrates pretrain, fine-tune, and optional visualization runs across datasets, seeds, models, and ablations.
 - `models/smart.py` defines the SMART-family encoders and classifiers.
-- `analysis/mnar_verification.py` audits missingness patterns and writes CSV/figure outputs under `analysis/results/`.
+- `analysis/mnar_verification.py` is the retained entry point for the train-only structured-missingness audit and selected masking groups.
 - `analyze_pmae.py` inspects proportional masking behavior and optional per-variable reconstruction loss.
 - `visualize.py` generates missingness and representation figures from trained checkpoints.
 
@@ -36,6 +36,14 @@ CLI dataset names:
 - `mimic_phenotyping`
 - `mimic_decompensation`
 - `mimic_lengthofstay`
+
+## Reproducible Splits And Audit Scope
+
+The BIBM revision protocol separates patient splitting from training randomness. C12 and C19 use a fixed `80/10/10` split with seed `42`. MIMIC tasks prefer persisted `split_sizes` when those are present in a pickle; otherwise mortality, phenotyping, and length-of-stay use a fixed `random.Random(42)` split. Decompensation continues to use its persisted split when provided.
+
+All paper audit results and structured system-level masking groups must be produced from the training split only. Training seeds (`1`, `42`, and `3407` in the BIBM grid) still govern model initialization and corruption randomness, but do not select different patients.
+
+`data/feature_registry.py` is the canonical source for feature order and candidate physiological systems. In particular, C12 follows the stored preprocessing order (`DiasABP`, `MAP`, and `SysABP` at the invasive blood-pressure indices), rather than older loader-local aliases.
 
 ## Model Variants
 
@@ -89,13 +97,21 @@ For MIMIC length-of-stay, the local runner uses the ROC-style classification pro
 python main_finetune.py --dataset mimic_lengthofstay --los-task classification --los-label-unit auto --los-save-metric auc_micro
 ```
 
-Check missingness evidence:
+Generate the structured-missingness audit inputs for the revision:
 
 ```bash
-python analysis/mnar_verification.py --output-dir analysis/results
+python analysis/mnar_verification.py --split train --split-seed 42 --output-dir analysis/results/bibm_audit_fixed
 ```
 
-It is recommended to use fixed seeds when preprocessing datasets and running experiments.
+The audit writes `structured_missingness_summary.csv` and `selected_mask_groups.json`. T2 is evaluated only for binary endpoints (`c12`, `c19`, `mimic_mortality`, and `mimic_decompensation`); phenotyping and length-of-stay report T2 as not applicable. T2 and T3 counts use Benjamini--Hochberg adjusted `q_value < 0.05`. T4 uses Spearman correlations of per-record observation fractions, and a candidate block is retained for system-level masking only when `delta > 0.5`.
+
+Inspect the fixed-protocol BIBM command grid before starting training:
+
+```bash
+python experiments/bibm_smile/run_bibm_experiments.py --dry-run
+```
+
+The revision runner consumes `analysis/results/bibm_audit_fixed/selected_mask_groups.json` for structured masking variants and isolates new checkpoints under `export/bibm_audit_fixed/`. Capacity-Control and Random-Bias Control remain unimplemented controls and should not be reported as measured results.
 
 ## Outputs
 
@@ -106,6 +122,16 @@ export/<dataset>/<model>/seed_<seed>/
 ```
 
 The key checkpoints are `checkpoint-mse.pth` after pretraining and `checkpoint-prc.pth` after fine-tuning. `training.log` captures per-run logs.
+
+For the BIBM audit-fixed revision, use only:
+
+```text
+analysis/results/bibm_audit_fixed/
+export/bibm_audit_fixed/<dataset>/<model>/seed_<seed>/
+experiments/bibm_smile/results/bibm_audit_fixed/
+```
+
+Do not aggregate legacy `export/` logs into revision tables. Re-run paired comparisons from the audit-fixed long-format results CSV after all required task/variant/seed combinations complete.
 
 ## Citation
 ```

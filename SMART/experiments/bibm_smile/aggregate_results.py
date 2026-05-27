@@ -17,9 +17,10 @@ from statistics import mean, pstdev
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]
+SMART_DIR = HERE.parents[1]
 DEFAULT_CONFIG = HERE / "configs" / "bibm_smile_experiments.json"
-DEFAULT_OUT = HERE / "results"
+DEFAULT_EXPORT_ROOT = SMART_DIR / "export" / "bibm_audit_fixed"
+DEFAULT_OUT = HERE / "results" / "bibm_audit_fixed"
 
 BINARY_DATASETS = {"c12", "c19", "mimic_mortality", "mimic_decompensation"}
 MULTI_DATASETS = {"mimic_phenotyping", "mimic_lengthofstay"}
@@ -40,9 +41,9 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def candidate_logs(repo: Path, dataset: str, variant: str, seed: int) -> list[Path]:
+def candidate_logs(export_root: Path, dataset: str, variant: str, seed: int) -> list[Path]:
     rel = Path(dataset) / variant / f"seed_{seed}" / "training.log"
-    return [repo / "export" / rel, repo / "SMART" / "export" / rel]
+    return [export_root / rel]
 
 
 def choose_log(paths: list[Path]) -> Path | None:
@@ -157,6 +158,7 @@ def make_ablation_table(summary: list[dict], out_path: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--export-root", type=Path, default=DEFAULT_EXPORT_ROOT)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args()
 
@@ -165,7 +167,7 @@ def main() -> int:
     for name, variant in cfg["implemented_variants"].items():
         for dataset in cfg["datasets"]:
             for seed in cfg["seeds"]:
-                log_path = choose_log(candidate_logs(REPO, dataset, variant, seed))
+                log_path = choose_log(candidate_logs(args.export_root, dataset, variant, seed))
                 base = {
                     "dataset": dataset,
                     "variant_name": name,

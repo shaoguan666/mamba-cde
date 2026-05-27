@@ -28,7 +28,7 @@ Run commands from `SMART/` unless the command explicitly says otherwise.
 ```bash
 python run_all_experiments.py --dry-run
 python run_all_experiments.py --models smart smart-smile-lean-v2 --datasets c12 c19 --seeds 1 42 --use-torchrun --devices 0,1
-python analysis/mnar_verification.py --output-dir analysis/results
+python analysis/mnar_verification.py --split train --split-seed 42 --output-dir analysis/results/bibm_audit_fixed
 python analyze_pmae.py --dataset c12 --skip_model
 ```
 
